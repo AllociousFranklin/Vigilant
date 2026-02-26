@@ -81,7 +81,7 @@ def normalize_punycode(url: str) -> tuple[str, bool]:
                     decoded_labels.append(label)
             decoded_host = '.'.join(decoded_labels)
             url = url.replace(hostname, decoded_host, 1)
-    except Exception:
+    except (Exception, ValueError):
         pass
     return url, has_punycode
 
@@ -105,7 +105,7 @@ def is_short_url(url: str) -> bool:
         parsed = urllib.parse.urlparse(url)
         hostname = (parsed.hostname or "").lower()
         return hostname in SHORT_URL_DOMAINS
-    except Exception:
+    except (Exception, ValueError):
         return False
 
 
@@ -168,7 +168,7 @@ def canonicalize_url(url: str) -> str:
             parsed.params, parsed.query, ""
         ))
         return canonical
-    except Exception:
+    except (Exception, ValueError):
         return url
 
 
@@ -231,7 +231,7 @@ def extract_link_mismatches(html: str) -> list[dict]:
                         'displayed_domain': display_parsed.hostname,
                         'actual_domain': href_parsed.hostname,
                     })
-            except Exception:
+            except (Exception, ValueError):
                 pass
     
     return mismatches

@@ -41,6 +41,7 @@ def extract_urls_from_text(text: str) -> list[str]:
     normalized = []
     for url in urls:
         url = url.strip().rstrip('.,;:!?)')
+        url = url.replace('[.]', '.').replace('[-]', '-').replace('[:]', ':')
         if not url.startswith(('http://', 'https://')):
             url = 'https://' + url
         normalized.append(url)
@@ -75,9 +76,17 @@ def ingest(url: str = None, text: str = None, html_body: str = None,
     if not url and not text and not html_body:
         raise ValueError("At least one of url, text, or html_body must be provided")
     
+    if url:
+        url = url.replace('[.]', '.').replace('[-]', '-').replace('[:]', ':')
+    if text:
+        text = text.replace('[.]', '.').replace('[-]', '-').replace('[:]', ':')
+    if html_body:
+        html_body = html_body.replace('[.]', '.').replace('[-]', '-').replace('[:]', ':')
+    
     # Extract URLs from text content
     extracted_urls = []
     if url:
+        url = url.replace('[.]', '.').replace('[-]', '-').replace('[:]', ':')
         extracted_urls.append(url.strip())
     if text:
         extracted_urls.extend(extract_urls_from_text(text))

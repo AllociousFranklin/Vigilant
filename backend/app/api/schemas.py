@@ -1,6 +1,6 @@
 """VIGILANT - Pydantic Schemas for API Request/Response"""
 from pydantic import BaseModel, Field
-from typing import Optional
+from typing import Optional, Any
 from enum import Enum
 
 
@@ -18,10 +18,24 @@ class ProcessingState(str, Enum):
 
 
 class Severity(str, Enum):
-    LOW = "LOW"
-    MEDIUM = "MEDIUM"
-    HIGH = "HIGH"
-    CRITICAL = "CRITICAL"
+    LOW = "LOW (Advisory)"
+    MEDIUM = "MEDIUM (Suspicious)"
+    HIGH = "HIGH (Likely Phishing)"
+    CRITICAL = "CRITICAL (Block)"
+
+
+class ThreatType(str, Enum):
+    BRAND_PHISHING = "BRAND_PHISHING"
+    CALLBACK_PHISHING = "CALLBACK_PHISHING"
+    CREDENTIAL_HARVESTING = "CREDENTIAL_HARVESTING"
+    MALWARE_DELIVERY = "MALWARE_DELIVERY"
+    SUSPICIOUS_PROMOTION = "SUSPICIOUS_PROMOTION"
+    UNKNOWN = "UNKNOWN"
+    NONE = "NONE"
+
+class EnforcementMode(str, Enum):
+    PREVENTIVE = "PREVENTIVE"
+    ADVISORY = "ADVISORY"
 
 
 class ScanRequest(BaseModel):
@@ -37,24 +51,49 @@ class ScanRequest(BaseModel):
 class ReasonDetail(BaseModel):
     """Single explainability reason."""
     reason: str
-    confidence: float = Field(..., ge=0, le=100)
+    confidence: Optional[float] = Field(None, ge=0, le=100) # Keep for backward compatibility internally, but we change it to signal_strength
+    signal_strength: str = Field(default="MODERATE") # STRONG, MODERATE, WEAK
     category: str
 
 
-class ScanResponse(BaseModel):
-    """Output payload from phishing scan."""
-    scan_id: str
+class DetectionBlock(BaseModel):
+    """Raw signals extracted from the artifact."""
+    features: dict
+    normalized_url: Optional[str] = None
+
+class AssessmentBlock(BaseModel):
+    """Interpretation of the signals (ML + Policy)."""
     risk_score: float = Field(..., ge=0, le=100)
     severity: Severity
+    threat_type: ThreatType
     is_phishing: bool
     reasons: list[ReasonDetail]
-    overrides: Optional[list[dict]] = None
-    features: Optional[dict] = None
-    normalized_url: Optional[str] = None
+    confidence_band: str = Field(default="HIGH_CONFIDENCE")
+    policy_version: str
+    model_version: str
+
+class DecisionBlock(BaseModel):
+    """Final action recommendation."""
+    recommended_action: str
+    enforcement_mode: EnforcementMode
+
+class ScanResponse(BaseModel):
+    """Output payload from phishing scan with explicit Separation of Concerns."""
+    scan_id: str
     channel: Channel
     latency_ms: float
     processing_state: ProcessingState = Field(ProcessingState.FINAL)
-    model_versions: Optional[dict] = None
+    
+    detection: DetectionBlock
+    assessment: AssessmentBlock
+    decision: DecisionBlock
+
+    # Keeping old fields for a bit of backward compatibility during transition if needed, but the UI should use the blocks.
+    risk_score: Optional[float] = None
+    severity: Optional[Severity] = None
+    is_phishing: Optional[bool] = None
+    reasons: Optional[list[ReasonDetail]] = None
+    features: Optional[dict] = None
 
 
 class FeedbackRequest(BaseModel):
@@ -92,6 +131,7 @@ class HistoryItem(BaseModel):
     input_preview: str
     reasons: list[ReasonDetail]
     latency_ms: float
+    threat_type: str = Field(default="UNKNOWN")
 
 
 class HistoryResponse(BaseModel):

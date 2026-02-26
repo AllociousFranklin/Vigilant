@@ -1,6 +1,7 @@
 """VIGILANT - FastAPI Application Entry Point"""
 from contextlib import asynccontextmanager
-from fastapi import FastAPI
+from fastapi import FastAPI, Request
+from fastapi.responses import JSONResponse
 from fastapi.middleware.cors import CORSMiddleware
 
 from app.core.config import settings
@@ -51,6 +52,27 @@ app.add_middleware(
     allow_methods=["*"],
     allow_headers=["*"],
 )
+
+from fastapi.exceptions import RequestValidationError
+from fastapi import Request
+from fastapi.responses import JSONResponse
+
+@app.exception_handler(RequestValidationError)
+async def validation_exception_handler(request: Request, exc: RequestValidationError):
+    import traceback
+    print("====== FASTAPI VALIDATION ERROR ======")
+    print(exc.errors())
+    return JSONResponse(
+        status_code=400,
+        content={"detail": "FastAPI Validation Error", "body": exc.body, "errors": exc.errors()},
+    )
+
+@app.exception_handler(Exception)
+async def global_exception_handler(request: Request, exc: Exception):
+    import traceback
+    print("====== GLOBAL EXCEPTION CAUGHT ======")
+    traceback.print_exc()
+    return JSONResponse(status_code=400, content={"detail": f"Global intercept: {str(exc)}"})
 
 # Register routes
 app.include_router(router, prefix=settings.API_PREFIX)

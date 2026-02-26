@@ -1,6 +1,6 @@
 import React, { useState } from 'react';
 import { motion, AnimatePresence } from 'framer-motion';
-import { Search, Mail, MessageSquare, Link as LinkIcon, AlertTriangle, CheckCircle2, Loader2, ShieldAlert } from 'lucide-react';
+import { Search, Mail, MessageSquare, Link as LinkIcon, AlertTriangle, CheckCircle2, Loader2, ShieldAlert, Info } from 'lucide-react';
 import { vigilantApi } from '../utils/api';
 import RiskGauge from '../components/RiskGauge';
 
@@ -161,6 +161,26 @@ const Scanner = () => {
                                     <p style={{ color: 'var(--text-secondary)', fontSize: '0.9rem', marginBottom: '0.5rem' }}>ANALYSIS LATENCY</p>
                                     <div style={{ fontSize: '1.5rem', fontWeight: 600, color: 'var(--accent)' }}>{result.latency_ms}ms</div>
                                 </div>
+                                {result.assessment?.confidence_band && (
+                                    <div style={{ marginTop: '1.5rem' }}>
+                                        <p style={{ color: 'var(--text-secondary)', fontSize: '0.9rem', marginBottom: '0.5rem' }}>CONFIDENCE BAND</p>
+                                        <div style={{
+                                            display: 'inline-block',
+                                            padding: '0.25rem 0.75rem',
+                                            borderRadius: '1rem',
+                                            fontSize: '0.85rem',
+                                            fontWeight: 600,
+                                            background: result.assessment.confidence_band === 'HIGH_CONFIDENCE' ? 'rgba(16, 185, 129, 0.1)' :
+                                                result.assessment.confidence_band === 'MIXED_SIGNALS' ? 'rgba(245, 158, 11, 0.1)' :
+                                                    'rgba(239, 68, 68, 0.1)',
+                                            color: result.assessment.confidence_band === 'HIGH_CONFIDENCE' ? 'var(--success)' :
+                                                result.assessment.confidence_band === 'MIXED_SIGNALS' ? 'var(--warning)' :
+                                                    'var(--danger)'
+                                        }}>
+                                            {result.assessment.confidence_band.replace('_', ' ')}
+                                        </div>
+                                    </div>
+                                )}
                             </div>
 
                             <div>
@@ -182,7 +202,17 @@ const Scanner = () => {
                                             >
                                                 <div style={{ display: 'flex', justifyContent: 'space-between', marginBottom: '0.25rem' }}>
                                                     <span style={{ fontSize: '0.8rem', color: 'var(--accent)', fontWeight: 600, textTransform: 'uppercase' }}>{reason.category}</span>
-                                                    <span style={{ fontSize: '0.8rem', color: 'var(--text-muted)' }}>{Math.round(reason.confidence)}% confidence</span>
+                                                    <span style={{
+                                                        fontSize: '0.75rem',
+                                                        padding: '0.2rem 0.5rem',
+                                                        borderRadius: '4px',
+                                                        background: reason.signal_strength === 'STRONG' ? 'rgba(239, 68, 68, 0.1)' : reason.signal_strength === 'MODERATE' ? 'rgba(245, 158, 11, 0.1)' : 'rgba(16, 185, 129, 0.1)',
+                                                        color: reason.signal_strength === 'STRONG' ? 'var(--danger)' : reason.signal_strength === 'MODERATE' ? 'var(--warning)' : 'var(--success)',
+                                                        fontWeight: 600,
+                                                        letterSpacing: '0.5px'
+                                                    }}>
+                                                        {reason.signal_strength} SIGNAL
+                                                    </span>
                                                 </div>
                                                 <p style={{ fontSize: '1rem', color: 'var(--text-primary)' }}>{reason.reason}</p>
                                             </motion.div>
@@ -193,6 +223,35 @@ const Scanner = () => {
                                             <p>No major risk factors detected.</p>
                                         </div>
                                     )}
+                                </div>
+
+                                {/* Decision Block */}
+                                {result.decision && (
+                                    <div style={{ marginTop: '2rem', padding: '1.5rem', background: 'var(--bg-deep)', borderRadius: '1rem', border: '1px solid var(--border)' }}>
+                                        <h4 style={{ fontSize: '1.1rem', marginBottom: '1rem', color: 'var(--text-primary)' }}>Recommended Action</h4>
+                                        <div style={{ display: 'flex', alignItems: 'center', gap: '1rem' }}>
+                                            <div style={{
+                                                padding: '0.5rem 1rem',
+                                                background: result.decision.recommended_action === 'ALLOW' ? 'var(--success-dim)' : 'var(--danger-dim)',
+                                                color: result.decision.recommended_action === 'ALLOW' ? 'var(--success)' : 'var(--danger)',
+                                                borderRadius: '0.5rem',
+                                                fontWeight: 600
+                                            }}>
+                                                {result.decision.recommended_action.replace(/_/g, ' ')}
+                                            </div>
+                                            <span style={{ color: 'var(--text-muted)', fontSize: '0.9rem' }}>
+                                                Mode: {result.decision.enforcement_mode}
+                                            </span>
+                                        </div>
+                                    </div>
+                                )}
+
+                                {/* Disclaimer / Notice */}
+                                <div style={{ marginTop: '2rem', display: 'flex', gap: '0.75rem', alignItems: 'flex-start', padding: '1rem', background: 'rgba(59, 130, 246, 0.1)', borderRadius: '0.5rem' }}>
+                                    <Info size={20} color="var(--accent)" style={{ flexShrink: 0, marginTop: '2px' }} />
+                                    <p style={{ fontSize: '0.85rem', color: 'var(--text-secondary)', margin: 0, lineHeight: 1.5 }}>
+                                        <strong>Disclaimer:</strong> This assessment is generated by an automated system. A LOW severity score means no known malicious signatures were found; it does not guarantee the content is safe. Always verify unexpected requests independently.
+                                    </p>
                                 </div>
 
                                 <div style={{ marginTop: '2rem', display: 'flex', gap: '1rem' }}>

@@ -4,17 +4,17 @@ import { motion } from 'framer-motion';
 const RiskGauge = ({ score }) => {
     // Map score to color
     const getColor = (s) => {
-        if (s < 30) return 'var(--success)';
-        if (s < 60) return 'var(--warning)';
+        if (s < 35) return 'var(--success)';
+        if (s < 65) return 'var(--warning)';
         if (s < 85) return 'var(--danger)';
         return '#be123c'; // Extra dark red for CRITICAL
     };
 
     const getLabel = (s) => {
-        if (s < 30) return 'LOW';
-        if (s < 60) return 'MEDIUM';
-        if (s < 85) return 'HIGH';
-        return 'CRITICAL';
+        if (s < 35) return 'LOW (Advisory)';
+        if (s < 65) return 'MEDIUM (Suspicious)';
+        if (s < 85) return 'HIGH (Malicious)';
+        return 'CRITICAL (Severe Threat)';
     };
 
     const color = getColor(score);

@@ -4,7 +4,6 @@ Translates model outputs into human-readable reasons.
 This is the enterprise trust layer — security teams act on reasons, not scores.
 """
 
-
 # Feature → Human-readable reason mapping
 FEATURE_REASON_MAP = {
     # URL features
@@ -86,11 +85,7 @@ FEATURE_REASON_MAP = {
         'reason': 'Content impersonates a known brand or organization',
         'category': 'Brand Impersonation',
     },
-    'nlp_ai_pattern_score': {
-        'threshold': 0.7,
-        'reason': 'Content shows patterns consistent with AI-generated text',
-        'category': 'Content Analysis',
-    },
+    # REMOVED AI PATTERN SCORE AS IT'S NOISY
     'nlp_exclamation_ratio': {
         'threshold': 0.15,
         'reason': 'Excessive exclamation marks — creates artificial urgency',
@@ -113,9 +108,14 @@ FEATURE_REASON_MAP = {
         'reason': 'Hidden content detected — potential cloaking technique',
         'category': 'Deception',
     },
-    'struct_homoglyph_count': {
+    'text_unicode_noise': {
         'threshold': 0.1,
-        'reason': 'Homoglyph characters detected (visually similar but different characters)',
+        'reason': 'Non-standard characters detected (often used to bypass text filters).',
+        'category': 'Obfuscation',
+    },
+    'url_homoglyph_count': {
+        'threshold': 0.1,
+        'reason': 'Homoglyph characters detected (visually similar characters used to deceive)',
         'category': 'Obfuscation',
     },
     'struct_obfuscation_score': {
@@ -125,30 +125,55 @@ FEATURE_REASON_MAP = {
     },
 }
 
+def get_signal_strength(measured_val: float, threshold: float, is_inverse: bool) -> str:
+    """Returns 'STRONG', 'MODERATE', or 'WEAK' based on feature intensity relative to threshold."""
+    if is_inverse:
+        intensity = 1.0 - measured_val
+    else:
+        # If threshold is very small, we avoid division heavily
+        if threshold <= 0:
+            intensity = measured_val * 2
+        else:
+            intensity = measured_val / threshold
 
-def generate_explanations(features: dict, detection_result: dict, channel: str = "url") -> list[dict]:
+    if intensity > 2.5:
+        return "STRONG"
+    elif intensity > 1.2:
+        return "MODERATE"
+    else:
+        return "WEAK"
+
+def generate_explanations(features: dict, assessment_context: dict, channel: str = "url") -> list[dict]:
     """
-    Layer 5: Generate human-readable explanations for the detection result.
-    Includes channel-aware filtering to prevent "leaks" (e.g. HTTPS reasons on text only).
+    Layer 5: Generate human-readable explanations.
+    Includes explicit channel-gating to prevent false explainability (like homoglyphs in SMS).
+    Maps signal strength instead of fake percentages.
     """
     reasons = []
     
-    # Priority: Binary Overrides (Forced Rules)
-    overrides = detection_result.get('overrides') or []
+    # Priority 1: System Policy Overrides
+    overrides = assessment_context.get('overrides') or []
     for ovr in overrides:
         reasons.append({
-            'reason': f"[FORCED] {ovr['reason']}",
+            'reason': f"{ovr['reason']}",
             'confidence': 100.0,
+            'signal_strength': "STRONG",
             'category': 'System Policy',
             'id': ovr.get('id')
         })
-    
+        
     URL_ONLY_CATEGORIES = {'URL Analysis', 'Brand Impersonation', 'Security'}
 
     for feature_name, mapping in FEATURE_REASON_MAP.items():
-        # CHANNEL FILTERING
+        # CHANNEL FILTERING logic
         category = mapping.get('category', '')
+        
+        # Flaw 2 Fix: Homoglyph detection scoped to channel
         if channel != "url" and category in URL_ONLY_CATEGORIES:
+            continue
+        if channel != "url" and feature_name == "url_homoglyph_count":
+            continue
+        if channel == "url" and feature_name == "text_unicode_noise":
             continue
             
         value = features.get(feature_name, 0)
@@ -158,19 +183,12 @@ def generate_explanations(features: dict, detection_result: dict, channel: str =
         # Check if feature exceeds threshold
         triggered = False
         if is_inverse:
-            triggered = value < 0.5  # For inverse features (e.g., missing HTTPS)
+            triggered = value < 0.5
         else:
             triggered = value > threshold
         
         if triggered:
-            # Calculate confidence based on how much the value exceeds threshold
-            if is_inverse:
-                confidence = (1 - value) * 100
-            else:
-                if threshold > 0:
-                    confidence = min((value / threshold) * 50 + 50, 99)
-                else:
-                    confidence = 75.0
+            signal_strength = get_signal_strength(value, threshold, is_inverse)
             
             # Format the reason with actual values where applicable
             reason_text = mapping['reason']
@@ -182,18 +200,21 @@ def generate_explanations(features: dict, detection_result: dict, channel: str =
             
             reasons.append({
                 'reason': reason_text,
-                'confidence': round(confidence, 1),
+                'signal_strength': signal_strength,
                 'category': mapping['category'],
             })
     
-    # Sort by confidence (highest first), take top 8
-    reasons.sort(key=lambda r: r['confidence'], reverse=True)
+    # Sort logically: Strongest signals first
+    def strength_weight(r):
+        return {"STRONG": 3, "MODERATE": 2, "WEAK": 1}.get(r.get('signal_strength', 'WEAK'), 0)
+        
+    reasons.sort(key=strength_weight, reverse=True)
     
-    # If no specific reasons but score is high, add a generic reason
-    if not reasons and detection_result.get('risk_score', 0) > 50:
-        reasons.append({
-            'reason': 'Multiple weak signals combine to indicate phishing risk',
-            'confidence': detection_result['risk_score'],
+    # If no specific reasons but risk is high, append generic policy warning
+    if not reasons and assessment_context.get('risk_score', 0) > 50:
+         reasons.append({
+            'reason': 'Multiple subtle behavioral signals combine to indicate threat',
+            'signal_strength': 'MODERATE',
             'category': 'Combined Analysis',
         })
     

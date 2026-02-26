@@ -19,7 +19,7 @@ router = APIRouter()
 async def scan_artifact(request: ScanRequest, background_tasks: BackgroundTasks):
     """
     Main scan endpoint — accepts URL, email text, or SMS text.
-    Returns risk score, severity, and human-readable reasons.
+    Returns structured detection, assessment, and decision blocks.
     Supports asynchronous enrichment and rule suppression.
     """
     # Validate that at least one input is provided
@@ -40,31 +40,44 @@ async def scan_artifact(request: ScanRequest, background_tasks: BackgroundTasks)
             suppress_rules=request.suppress_rules
         )
         
-        # Convert reasons to response model
+        # Format reasons inside Assessment block
         reasons = [
             ReasonDetail(
-                reason=r["reason"],
-                confidence=r["confidence"],
-                category=r["category"],
+                reason=r.reason,
+                confidence=r.confidence, # Map old confidence here for now
+                signal_strength=getattr(r, "signal_strength", "MODERATE"), 
+                category=r.category,
             )
-            for r in result["reasons"]
+            for r in result["assessment"].reasons # Pipeline returns Pydantic models here due to dict casting
         ]
         
-        return ScanResponse(
+        # Result's assessment reasons are already dicts, need to replace with ReasonDetail models
+        result["assessment"].reasons = reasons
+        
+        # Build strict ScanResponse honoring the decoupled schema
+        response_model = ScanResponse(
             scan_id=result["scan_id"],
-            risk_score=result["risk_score"],
-            severity=result["severity"],
-            is_phishing=result["is_phishing"],
-            reasons=reasons,
-            overrides=result.get("overrides"),
-            features=result["features"],
-            normalized_url=result.get("normalized_url"),
-            channel=request.channel,
+            channel=result["channel"],
             latency_ms=result["latency_ms"],
             processing_state=result["processing_state"],
-            model_versions=result.get("model_versions"),
+            detection=result["detection"],
+            assessment=result["assessment"],
+            decision=result["decision"],
+            
+            # Temporary bridging for UI that might still read top-level
+            risk_score=result["assessment"].risk_score,
+            severity=result["assessment"].severity,
+            is_phishing=result["assessment"].is_phishing,
+            reasons=reasons,
+            features=result["detection"].features
         )
+        return response_model
+
     except ValueError as e:
+        import traceback
+        print("====== VALUE ERROR CAUGHT ======")
+        print(f"Payload: url={request.url}, text={request.text}, channel={request.channel}")
+        traceback.print_exc()
         raise HTTPException(status_code=400, detail=str(e))
     except Exception as e:
         raise HTTPException(status_code=500, detail=f"Internal error: {str(e)}")

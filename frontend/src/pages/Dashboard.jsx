@@ -58,18 +58,18 @@ const Dashboard = () => {
     ];
 
     const severityData = [
-        { name: 'Critical', value: stats?.severity_distribution?.CRITICAL || 0, color: '#be123c' },
-        { name: 'High', value: stats?.severity_distribution?.HIGH || 0, color: 'var(--danger)' },
-        { name: 'Medium', value: stats?.severity_distribution?.MEDIUM || 0, color: 'var(--warning)' },
-        { name: 'Low', value: stats?.severity_distribution?.LOW || 0, color: 'var(--success)' },
+        { name: 'CRITICAL (Severe Threat)', value: stats?.severity_distribution?.CRITICAL || 0, color: '#be123c' },
+        { name: 'HIGH (Malicious)', value: stats?.severity_distribution?.HIGH || 0, color: 'var(--danger)' },
+        { name: 'MEDIUM (Suspicious)', value: stats?.severity_distribution?.MEDIUM || 0, color: 'var(--warning)' },
+        { name: 'LOW (Advisory)', value: stats?.severity_distribution?.LOW || 0, color: 'var(--success)' },
     ].filter(d => d.value > 0);
 
     // Default display if no real data
     const displaySeverityData = severityData.length > 0 ? severityData : [
-        { name: 'Critical', value: 15, color: '#be123c' },
-        { name: 'High', value: 25, color: 'var(--danger)' },
-        { name: 'Medium', value: 35, color: 'var(--warning)' },
-        { name: 'Low', value: 25, color: 'var(--success)' },
+        { name: 'CRITICAL (Severe Threat)', value: 15, color: '#be123c' },
+        { name: 'HIGH (Malicious)', value: 25, color: 'var(--danger)' },
+        { name: 'MEDIUM (Suspicious)', value: 35, color: 'var(--warning)' },
+        { name: 'LOW (Advisory)', value: 25, color: 'var(--success)' },
     ];
 
     return (

@@ -1,0 +1,61 @@
+{
+  "results": [
+    {
+      "Name": "Homoglyph Typosquatting",
+      "Status": "FLAGGED",
+      "Score": 7.53,
+      "Severity": "LOW",
+      "Reasons": "No HTTPS encryption \u2014 connection is insecure, Homoglyph characters detected (visually similar but different characters)",
+      "Latency": 1339.21
+    },
+    {
+      "Name": "Shortened Phishing URL",
+      "Status": "FLAGGED",
+      "Score": 10.53,
+      "Severity": "LOW",
+      "Reasons": "Homoglyph characters detected (visually similar but different characters)",
+      "Latency": 672.44
+    },
+    {
+      "Name": "Encoded Redirect Trick",
+      "Status": "FLAGGED",
+      "Score": 8.79,
+      "Severity": "LOW",
+      "Reasons": "No HTTPS encryption \u2014 connection is insecure, Suspicious top-level domain detected",
+      "Latency": 73.07
+    },
+    {
+      "Name": "Urgency Social Engineering (Email)",
+      "Status": "FLAGGED",
+      "Score": 41.28,
+      "Severity": "MEDIUM",
+      "Reasons": "No HTTPS encryption \u2014 connection is insecure, Suspicious top-level domain detected",
+      "Latency": 70.22
+    },
+    {
+      "Name": "SMS Prize Scam",
+      "Status": "FLAGGED",
+      "Score": 46.95,
+      "Severity": "MEDIUM",
+      "Reasons": "No HTTPS encryption \u2014 connection is insecure, Suspicious top-level domain detected",
+      "Latency": 68.01
+    },
+    {
+      "Name": "Legitimate Enterprise URL",
+      "Status": "FLAGGED",
+      "Score": 0.18,
+      "Severity": "LOW",
+      "Reasons": "",
+      "Latency": 70.7
+    },
+    {
+      "Name": "Legitimate Personal Email",
+      "Status": "FLAGGED",
+      "Score": 13.3,
+      "Severity": "LOW",
+      "Reasons": "No HTTPS encryption \u2014 connection is insecure, Content shows patterns consistent with AI-generated text",
+      "Latency": 70.5
+    }
+  ],
+  "timestamp": "Wed Feb 25 23:29:07 2026"
+}

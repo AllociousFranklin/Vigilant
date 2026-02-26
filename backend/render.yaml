@@ -1,0 +1,9 @@
+services:
+  - type: web
+    name: vigilant-api
+    runtime: python
+    buildCommand: "pip install -r requirements.txt && python -m app.ml.train_url_model && python -m app.ml.train_nlp_model"
+    startCommand: "uvicorn app.main:app --host 0.0.0.0 --port $PORT"
+    envVars:
+      - key: PYTHON_VERSION
+        value: 3.11.0

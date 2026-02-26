@@ -1,0 +1,53 @@
+# Dependency directories
+node_modules/
+venv/
+env/
+__pycache__/
+*.pyc
+*.pyo
+*.pyd
+
+# Build directories
+dist/
+build/
+.next/
+out/
+
+# IDE files
+.vscode/
+.idea/
+*.swp
+*.swo
+
+# Environment variables & secrets
+.env
+.env.local
+.env.development.local
+.env.test.local
+.env.production.local
+*.pem
+*.key
+
+# Database
+*.sqlite
+*.db
+
+# Logs & Debugging
+*.log
+debug.log
+npm-debug.log*
+yarn-debug.log*
+yarn-error.log*
+output.json
+brutal_audit_data.json
+rigorous_test_results.json
+
+# System Files
+.DS_Store
+Thumbs.db
+
+# Large Models/Data (if applicable)
+*.h5
+*.joblib
+*.pkl
+models/

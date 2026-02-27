@@ -1,4 +1,4 @@
-import React, { useState, useEffect } from 'react';
+import React, { useState, useEffect, useCallback, useRef } from 'react';
 import { motion } from 'framer-motion';
 import { History as HistoryIcon, Filter, ExternalLink, Download, AlertTriangle, CheckCircle2 } from 'lucide-react';
 import { vigilantApi } from '../utils/api';
@@ -8,22 +8,38 @@ const History = () => {
     const [total, setTotal] = useState(0);
     const [loading, setLoading] = useState(true);
     const [page, setPage] = useState(1);
+    const isFetchingRef = useRef(false);
+
+    const fetchHistory = useCallback(async ({ silent = false } = {}) => {
+        if (isFetchingRef.current) return;
+        isFetchingRef.current = true;
+
+        if (!silent) setLoading(true);
+        try {
+            const data = await vigilantApi.getHistory(page);
+            setItems(data.items);
+            setTotal(data.total);
+        } catch (err) {
+            console.error('Failed to fetch history:', err);
+        } finally {
+            if (!silent) setLoading(false);
+            isFetchingRef.current = false;
+        }
+    }, [page]);
 
     useEffect(() => {
-        const fetchHistory = async () => {
-            setLoading(true);
-            try {
-                const data = await vigilantApi.getHistory(page);
-                setItems(data.items);
-                setTotal(data.total);
-            } catch (err) {
-                console.error('Failed to fetch history:', err);
-            } finally {
-                setLoading(false);
-            }
-        };
         fetchHistory();
-    }, [page]);
+    }, [fetchHistory]);
+
+    useEffect(() => {
+        const intervalId = setInterval(() => {
+            if (document.visibilityState === 'visible') {
+                fetchHistory({ silent: true });
+            }
+        }, 5000);
+
+        return () => clearInterval(intervalId);
+    }, [fetchHistory]);
 
     const getSeverityStyle = (severity) => {
         switch (severity) {

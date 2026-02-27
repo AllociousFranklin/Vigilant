@@ -1,53 +1,198 @@
-# Dependency directories
-node_modules/
+# ============================================
+# Python
+# ============================================
+# Byte-compiled / optimized / DLL files
+__pycache__/
+*.py[cod]
+*$py.class
+*.so
+
+# Distribution / packaging
+.Python
+build/
+develop-eggs/
+dist/
+downloads/
+eggs/
+.eggs/
+lib/
+lib64/
+parts/
+sdist/
+var/
+wheels/
+pip-wheel-metadata/
+share/python-wheels/
+*.egg-info/
+.installed.cfg
+*.egg
+MANIFEST
+
+# Virtual environments
 venv/
 env/
-__pycache__/
-*.pyc
-*.pyo
-*.pyd
+ENV/
+env.bak/
+venv.bak/
+.venv/
 
-# Build directories
+# PyInstaller
+*.manifest
+*.spec
+
+# Unit test / coverage reports
+htmlcov/
+.tox/
+.nox/
+.coverage
+.coverage.*
+.cache
+nosetests.xml
+coverage.xml
+*.cover
+*.py,cover
+.hypothesis/
+.pytest_cache/
+test_*.txt
+test_*_out.txt
+
+# ============================================
+# Node.js / Frontend
+# ============================================
+# Dependencies
+node_modules/
+jspm_packages/
+package-lock.json
+yarn.lock
+pnpm-lock.yaml
+.pnp/
+.pnp.js
+
+# Build outputs
 dist/
+dist-ssr/
 build/
 .next/
 out/
+.cache/
+.parcel-cache/
+.vite/
+.turbo/
 
-# IDE files
+# Logs
+npm-debug.log*
+yarn-debug.log*
+yarn-error.log*
+lerna-debug.log*
+pnpm-debug.log*
+
+# ============================================
+# IDE / Editors
+# ============================================
 .vscode/
 .idea/
 *.swp
 *.swo
+*~
+*.sublime-workspace
+*.sublime-project
+.project
+.classpath
+.settings/
 
-# Environment variables & secrets
+# ============================================
+# Environment & Secrets
+# ============================================
 .env
 .env.local
+.env.development
 .env.development.local
+.env.test
 .env.test.local
+.env.production
 .env.production.local
 *.pem
 *.key
+*.crt
+config/secrets.yml
 
+# ============================================
 # Database
+# ============================================
 *.sqlite
+*.sqlite3
 *.db
+*.db-journal
+vigilant.db
 
-# Logs & Debugging
+# ============================================
+# Logs & Debug
+# ============================================
 *.log
 debug.log
-npm-debug.log*
-yarn-debug.log*
-yarn-error.log*
+logs/
+*.log.*
+
+# ============================================
+# Test Outputs & Reports
+# ============================================
+test_results/
+test_output/
 output.json
 brutal_audit_data.json
 rigorous_test_results.json
+test_api_out.txt
+red_team_tests.log
 
-# System Files
-.DS_Store
-Thumbs.db
+# Security audit and validation files
+BRUTAL_AUDIT_REPORT.md
+RIGOROUS_SECURITY_REPORT.md
+brutal_test.py
+rigorous_test.py
+v2_validation.py
+verify_logic.py
+test_scanning_implementation.py
+red_team_tests.py
 
-# Large Models/Data (if applicable)
+# ============================================
+# ML Models (excluding trained models)
+# ============================================
+# Keep the trained models but exclude large training data
 *.h5
-*.joblib
 *.pkl
-models/
+training_data/
+datasets/
+raw_data/
+*.csv
+*.parquet
+# Note: *.joblib models in backend/app/ml/models/ are tracked for deployment
+
+# ============================================
+# OS Files
+# ============================================
+.DS_Store
+.DS_Store?
+._*
+.Spotlight-V100
+.Trashes
+ehthumbs.db
+Thumbs.db
+Desktop.ini
+
+# ============================================
+# Chrome Extension
+# ============================================
+extension/*.crx
+extension/*.pem
+extension/node_modules/
+extension/dist/
+
+# ============================================
+# Temporary Files
+# ============================================
+*.tmp
+*.temp
+*.bak
+*.swp
+*~.nib
+.lock-wscript

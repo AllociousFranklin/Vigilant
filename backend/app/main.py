@@ -15,26 +15,26 @@ async def lifespan(app: FastAPI):
     """Startup and shutdown events."""
     # Startup
     print("=" * 60)
-    print(f"  🛡️  VIGILANT v{settings.APP_VERSION}")
+    print(f"  [VIGILANT] v{settings.APP_VERSION}")
     print(f"  {settings.APP_DESCRIPTION}")
     print("=" * 60)
     
     # Initialize database
     await init_db()
-    print("[✓] Database initialized")
+    print("[OK] Database initialized")
     
     # Load ML models
     detection_engine.load_models()
-    print(f"[✓] URL model: {detection_engine.url_model_version}")
-    print(f"[✓] NLP model: {detection_engine.nlp_model_version}")
+    print(f"[OK] URL model: {detection_engine.url_model_version}")
+    print(f"[OK] NLP model: {detection_engine.nlp_model_version}")
     print("=" * 60)
-    print("[✓] VIGILANT is ready for threat detection")
+    print("[OK] VIGILANT is ready for threat detection")
     print("=" * 60)
     
     yield
     
     # Shutdown
-    print("[✓] VIGILANT shutting down")
+    print("[OK] VIGILANT shutting down")
 
 
 app = FastAPI(

@@ -1,0 +1,39 @@
+# Chrome Extension package
+*.crx
+*.pem
+*.zip
+
+# Node modules (if any)
+node_modules/
+package-lock.json
+
+# Build outputs
+dist/
+build/
+web-ext-artifacts/
+
+# Generated icons
+icons/*.png
+!icons/shield-*.png
+
+# Logs
+*.log
+web-ext.log
+
+# IDE
+.vscode/
+.idea/
+*.swp
+*.swo
+
+# OS files
+.DS_Store
+Thumbs.db
+
+# Temporary files
+*.tmp
+*.bak
+*.cache
+
+# Web extension dev tools
+.web-extension-id

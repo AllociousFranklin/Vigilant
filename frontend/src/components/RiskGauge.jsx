@@ -55,7 +55,7 @@ const RiskGauge = ({ score }) => {
                         transition={{ duration: 1.5, ease: "easeOut" }}
                         strokeLinecap="round"
                         transform={`rotate(-90 ${center} ${center})`}
-                        style={{ filter: `drop-shadow(0 0 10px ${color}44)` }}
+                        style={{}}
                     />
                 </svg>
 

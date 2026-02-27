@@ -1,6 +1,7 @@
 {
   "model_type": "RandomForestClassifier",
-  "version": "v1.0",
+  "version": "v3.0",
+  "schema_hash": "79469d9d62420349bfcaa2be1ab0347fe729d24b170ecf01d9eb29e5996a871d",
   "features": [
     "url_length",
     "url_dot_count",
@@ -14,6 +15,7 @@
     "url_path_length",
     "url_has_https",
     "url_brand_similarity",
+    "url_brand_match",
     "nlp_urgency_score",
     "nlp_threat_count",
     "nlp_credential_count",
@@ -22,15 +24,23 @@
     "nlp_caps_ratio",
     "nlp_sender_impersonation",
     "nlp_ai_pattern_score",
+    "nlp_intent_trigger",
+    "nlp_intent_coercion",
+    "nlp_intent_harvest",
+    "nlp_intent_alignment",
+    "nlp_document_language",
+    "nlp_phone_number_present",
+    "nlp_authority_score",
     "struct_href_mismatch",
     "struct_has_login_form",
     "struct_hidden_ratio",
     "struct_homoglyph_count",
-    "struct_obfuscation_score"
+    "struct_obfuscation_score",
+    "struct_redirection_chain_len"
   ],
-  "n_features": 25,
-  "training_samples": 6000,
-  "accuracy": 1.0,
-  "cv_accuracy_mean": 1.0,
-  "cv_accuracy_std": 0.0
+  "n_features": 34,
+  "training_samples": 4005,
+  "accuracy": 0.7516,
+  "cv_accuracy_mean": 0.7416,
+  "cv_accuracy_std": 0.2298
 }

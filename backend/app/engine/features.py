@@ -72,6 +72,12 @@ ACTION_WORDS = {
     'reset your', 'change your', 'review your', 'submit',
 }
 
+# Document Lure keywords
+DOCUMENT_WORDS = {
+    'document', 'sign', 'review', 'attached', 'proposal', 'invoice',
+    'receipt', 'secure document', 'docusign', 'sharepoint', 'onedrive'
+}
+
 
 def calculate_entropy(text: str) -> float:
     """Calculate Shannon entropy of a string."""
@@ -158,7 +164,8 @@ def extract_url_features(url: str, signals: dict = None) -> dict:
         return {f"url_{k}": 0 for k in [
             'length', 'dot_count', 'hyphen_count', 'at_symbol',
             'entropy', 'digit_ratio', 'has_ip', 'suspicious_tld',
-            'subdomain_depth', 'path_length', 'has_https', 'brand_similarity', 'brand_match'
+            'subdomain_depth', 'path_length', 'has_https', 'brand_similarity', 'brand_match',
+            'is_punycode'
         ]}
     
     # Handle defanged or maliciously malformed URLs that crash urllib
@@ -196,17 +203,22 @@ def extract_url_features(url: str, signals: dict = None) -> dict:
     features['url_subdomain_depth'] = len(ext.subdomain.split('.')) if ext.subdomain else 0
     features['url_path_length'] = len(path)
     features['url_has_https'] = 1 if scheme == 'https' else 0
+    features['url_is_punycode'] = 1 if ext.domain.startswith("xn--") or ext.subdomain.startswith("xn--") else 0
     
     # Brand matching logic (Optimized)
     sim_score = brand_similarity_score(ext)
     features['url_brand_similarity'] = sim_score
     
-    # New feature: url_brand_match (1 if it matches a brand but ISN'T the brand domain)
+    # New feature: url_brand_match (1 if it matches a brand but ISN'T the official domain)
     is_spoof = 0
     h_lower = hostname.lower()
     for brand in BRAND_NAMES:
         if brand in h_lower:
             if ext.domain.lower() != brand:
+                is_spoof = 1
+                break
+            elif signals.get('homoglyph_count', 0) > 0 or signals.get('has_punycode', False):
+                # It's an exact match ONLY because we normalized away the deception
                 is_spoof = 1
                 break
     features['url_brand_match'] = is_spoof
@@ -267,7 +279,8 @@ def extract_nlp_features(text: str) -> dict:
         return {f"nlp_{k}": 0 for k in [
             'urgency_score', 'threat_count', 'credential_count',
             'action_count', 'exclamation_ratio', 'caps_ratio',
-            'sender_impersonation', 'ai_pattern_score', 'intent_alignment'
+            'sender_impersonation', 'ai_pattern_score', 'intent_alignment',
+            'document_language', 'phone_number_present'
         ]}
     
     text_lower = text.lower()
@@ -286,6 +299,11 @@ def extract_nlp_features(text: str) -> dict:
     features['nlp_threat_count'] = min(count_keyword_matches(text, THREAT_WORDS) / 3.0, 1.0)
     features['nlp_credential_count'] = min(count_keyword_matches(text, CREDENTIAL_WORDS) / 3.0, 1.0)
     features['nlp_action_count'] = min(count_keyword_matches(text, ACTION_WORDS) / 3.0, 1.0)
+    features['nlp_document_language'] = 1 if count_keyword_matches(text, DOCUMENT_WORDS) > 0 else 0
+    
+    # Phone number detection
+    phone_pattern = re.compile(r'(\+\d{1,2}\s?)?(\(?\d{3}\)?[\s.-]?)?\d{3}[\s.-]?\d{4}')
+    features['nlp_phone_number_present'] = 1 if phone_pattern.search(text) else 0
     
     # Textual density features
     features['nlp_exclamation_ratio'] = min(text.count('!') / total_words, 1.0)

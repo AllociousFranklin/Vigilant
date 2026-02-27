@@ -15,18 +15,9 @@ import joblib
 
 # Add parent to path
 sys.path.insert(0, os.path.join(os.path.dirname(__file__), '..', '..'))
+import hashlib
 from app.engine.features import extract_url_features, extract_nlp_features, extract_structural_features
-
-ALL_FEATURE_NAMES = [
-    'url_length', 'url_dot_count', 'url_hyphen_count', 'url_at_symbol',
-    'url_entropy', 'url_digit_ratio', 'url_has_ip', 'url_suspicious_tld',
-    'url_subdomain_depth', 'url_path_length', 'url_has_https', 'url_brand_similarity',
-    'nlp_urgency_score', 'nlp_threat_count', 'nlp_credential_count',
-    'nlp_action_count', 'nlp_exclamation_ratio', 'nlp_caps_ratio',
-    'nlp_sender_impersonation', 'nlp_ai_pattern_score',
-    'struct_href_mismatch', 'struct_has_login_form', 'struct_hidden_ratio',
-    'struct_homoglyph_count', 'struct_obfuscation_score',
-]
+from app.engine.detector import ALL_FEATURE_NAMES, get_feature_fingerprint
 
 
 def generate_training_data(n_samples=5000):
@@ -177,15 +168,22 @@ def train_model():
     print("  VIGILANT — URL Classifier Training")
     print("=" * 60)
     
-    # Generate training data
-    print("\n[1/5] Generating training data...")
-    df = generate_training_data(n_samples=6000)
+    # Load canonical training data
+    print("\n[1/5] Loading canonical artifact (training_v3.parquet)...")
+    parquet_path = os.path.join(os.path.dirname(__file__), 'training_v3.parquet')
+    if not os.path.exists(parquet_path):
+        raise FileNotFoundError(f"Canonical artifact not found at {parquet_path}. Run data_shim.py first.")
+    
+    df = pd.read_parquet(parquet_path)
     print(f"  Total samples: {len(df)}")
     print(f"  Phishing: {(df['label'] == 1).sum()}")
     print(f"  Legitimate: {(df['label'] == 0).sum()}")
     
+    # Check for kill switch
+    benign_authority_df = df[df['source'] == 'benign_authority']
+    
     # Prepare features and labels
-    print("\n[2/5] Preparing features...")
+    print("\n[2/5] Preparing features (Enforcing exact feature order)...")
     X = df[ALL_FEATURE_NAMES].values
     y = df['label'].values
     
@@ -235,8 +233,23 @@ def train_model():
         idx = indices[i]
         print(f"    {ALL_FEATURE_NAMES[idx]}: {importance[idx]:.4f}")
     
+    print("\n[4.5/5] Executing Mandatory KILL-SWITCH Rule (Benign Authority FPs)...")
+    if len(benign_authority_df) > 0:
+        X_benigh_auth = benign_authority_df[ALL_FEATURE_NAMES].values
+        y_pred_benign = model.predict(X_benigh_auth)
+        fp_count = y_pred_benign.sum()  # Since true tag is 0
+        fp_rate = fp_count / len(benign_authority_df)
+        print(f"  Benign Authority FP Rate: {fp_rate:.4f} ({fp_count}/{len(benign_authority_df)})")
+        
+        if fp_rate > 0.01:
+            raise RuntimeError(f"KILL-SWITCH ACTIVATED: Benign Authority False Positive Rate is {fp_rate:.2%}, which exceeds the 1.0% limit. ABORTING MODEL SAVE. DO NOT SHIP TO PROD.")
+        else:
+            print("  ✓ Guardrail passed. Saving models allowed.")
+    else:
+         print("  [WARN] No benign authority samples found in canonical artifact.")
+
     # Save model
-    print("\n[5/5] Saving model...")
+    print("\n[5/5] Saving model v3.0...")
     os.makedirs(os.path.join(os.path.dirname(__file__), 'models'), exist_ok=True)
     model_path = os.path.join(os.path.dirname(__file__), 'models', 'url_classifier.joblib')
     joblib.dump(model, model_path)
@@ -246,7 +259,8 @@ def train_model():
     meta_path = os.path.join(os.path.dirname(__file__), 'models', 'url_model_meta.json')
     meta = {
         "model_type": "XGBClassifier",
-        "version": "v1.0",
+        "version": "v3.0",
+        "schema_hash": get_feature_fingerprint(),
         "features": ALL_FEATURE_NAMES,
         "n_features": len(ALL_FEATURE_NAMES),
         "training_samples": len(df),

@@ -1,0 +1,29 @@
+{
+    "test_cases": [
+        {
+            "text": "From IT Security: Please confirm your MFA enrollment before Friday to maintain VPN access.",
+            "expected_severity": "LOW",
+            "expected_threat_type": "UNKNOWN"
+        },
+        {
+            "text": "HR Department: Open enrollment for benefits begins next week. Please review your current elections.",
+            "expected_severity": "LOW",
+            "expected_threat_type": "UNKNOWN"
+        },
+        {
+            "text": "This is an automated message from the Internal Revenue Service regarding your tax compliance status.",
+            "expected_severity": "LOW",
+            "expected_threat_type": "UNKNOWN"
+        },
+        {
+            "text": "Helpdesk Incident #4892: Your password will expire in 14 days. This is a system notification.",
+            "expected_severity": "LOW",
+            "expected_threat_type": "UNKNOWN"
+        },
+        {
+            "text": "Notice of policy update: All employees must complete the annual compliance training.",
+            "expected_severity": "LOW",
+            "expected_threat_type": "UNKNOWN"
+        }
+    ]
+}

@@ -24,9 +24,14 @@ async def init_db():
                 reasons_json TEXT,
                 features_json TEXT,
                 latency_ms REAL,
-                model_versions_json TEXT
+                model_versions_json TEXT,
+                device_id TEXT DEFAULT 'unknown_device'
             )
         """)
+        try:
+            await db.execute("ALTER TABLE detections ADD COLUMN device_id TEXT DEFAULT 'unknown_device'")
+        except Exception:
+            pass
         await db.execute("""
             CREATE TABLE IF NOT EXISTS feedback (
                 id INTEGER PRIMARY KEY AUTOINCREMENT,
@@ -59,10 +64,10 @@ async def save_detection(detection: dict):
         await db.execute("""
             INSERT OR REPLACE INTO detections (scan_id, timestamp, channel, input_preview, input_hash,
                                      normalized_url, risk_score, severity, is_phishing,
-                                     reasons_json, features_json, latency_ms, model_versions_json)
+                                     reasons_json, features_json, latency_ms, model_versions_json, device_id)
             VALUES (:scan_id, :timestamp, :channel, :input_preview, :input_hash,
                     :normalized_url, :risk_score, :severity, :is_phishing,
-                    :reasons_json, :features_json, :latency_ms, :model_versions_json)
+                    :reasons_json, :features_json, :latency_ms, :model_versions_json, :device_id)
         """, detection)
         await db.commit()
 

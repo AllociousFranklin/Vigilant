@@ -6,6 +6,7 @@ from fastapi.middleware.cors import CORSMiddleware
 
 from app.core.config import settings
 from app.api.routes import router
+from app.api.dashboard import dashboard_router
 from app.db.database import init_db
 from app.engine.detector import detection_engine
 
@@ -76,6 +77,7 @@ async def global_exception_handler(request: Request, exc: Exception):
 
 # Register routes
 app.include_router(router, prefix=settings.API_PREFIX)
+app.include_router(dashboard_router, prefix=f"{settings.API_PREFIX}/dashboard", tags=["dashboard"])
 
 
 # Root endpoint

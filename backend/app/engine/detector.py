@@ -8,9 +8,8 @@ import joblib
 import os
 from typing import Optional
 from app.core.config import settings
-
-
-# Feature order must match training
+from app.services.phishtank import check_domain
+import urllib.parse
 URL_FEATURE_NAMES = [
     'url_length', 'url_dot_count', 'url_hyphen_count', 'url_at_symbol',
     'url_entropy', 'url_digit_ratio', 'url_has_ip', 'url_suspicious_tld',
@@ -23,15 +22,24 @@ NLP_FEATURE_NAMES = [
     'nlp_action_count', 'nlp_exclamation_ratio', 'nlp_caps_ratio',
     'nlp_sender_impersonation', 'nlp_ai_pattern_score',
     'nlp_intent_trigger', 'nlp_intent_coercion', 'nlp_intent_harvest',
-    'nlp_intent_alignment',
+    'nlp_intent_alignment', 'nlp_document_language', 'nlp_phone_number_present',
+    'nlp_authority_score'
 ]
 
 STRUCTURAL_FEATURE_NAMES = [
     'struct_href_mismatch', 'struct_has_login_form', 'struct_hidden_ratio',
     'struct_homoglyph_count', 'struct_obfuscation_score',
+    'struct_redirection_chain_len'
 ]
 
 ALL_FEATURE_NAMES = URL_FEATURE_NAMES + NLP_FEATURE_NAMES + STRUCTURAL_FEATURE_NAMES
+
+import hashlib
+
+def get_feature_fingerprint() -> str:
+    """Generate a SHA-256 hash of the exact feature schema."""
+    schema_str = ",".join(ALL_FEATURE_NAMES)
+    return hashlib.sha256(schema_str.encode('utf-8')).hexdigest()
 
 
 class DetectionEngine:
@@ -53,19 +61,37 @@ class DetectionEngine:
     
     def load_models(self):
         """Load pre-trained models from disk."""
+        current_fingerprint = get_feature_fingerprint()
+
         # URL model
         url_path = settings.URL_MODEL_PATH
+        url_meta_path = url_path.replace('.joblib', '_meta.json')
         if os.path.exists(url_path):
+            if os.path.exists(url_meta_path):
+                import json
+                with open(url_meta_path, 'r') as f:
+                    meta = json.load(f)
+                    if meta.get("schema_hash") and meta["schema_hash"] != current_fingerprint:
+                        raise RuntimeError(f"URL Model schema mismatch! Expected {current_fingerprint}, got {meta['schema_hash']}. Please retrain.")
+            
             self.url_model = joblib.load(url_path)
-            self.url_model_version = "v1.0"
+            self.url_model_version = "v3.0"
         else:
             print(f"[WARN] URL model not found at {url_path} — using heuristic fallback")
         
         # NLP model
         nlp_path = settings.NLP_MODEL_PATH
+        nlp_meta_path = nlp_path.replace('.joblib', '_meta.json')
         if os.path.exists(nlp_path):
+            if os.path.exists(nlp_meta_path):
+                import json
+                with open(nlp_meta_path, 'r') as f:
+                    meta = json.load(f)
+                    if meta.get("schema_hash") and meta["schema_hash"] != current_fingerprint:
+                        raise RuntimeError(f"NLP Model schema mismatch! Expected {current_fingerprint}, got {meta['schema_hash']}. Please retrain.")
+
             self.nlp_model = joblib.load(nlp_path)
-            self.nlp_model_version = "v1.0"
+            self.nlp_model_version = "v3.0"
         else:
             print(f"[WARN] NLP model not found at {nlp_path} — using heuristic fallback")
         
@@ -172,12 +198,16 @@ class DetectionEngine:
                         "reason": "URL uses '@' symbol to hide the actual host destination.",
                         "force_severity": "HIGH"
                     })
+                    
+            # Rule 4: Real-time Threat Intel (PhishTank Layer 2)
+            if "RULE_THREAT_INTEL" not in suppress_rules:
+                pass
 
         return new_score, applied
 
-    def predict(self, features: dict, channel: str = "url", suppress_rules: list = None) -> dict:
+    def predict(self, features: dict, channel: str = "url", suppress_rules: list = None, raw_url: str = None) -> dict:
         """
-        Run ensemble prediction with v2.0 hardening.
+        Run ensemble prediction with v2.0 hardening and v4.0 Threat Intel.
         """
         if not self._loaded:
             self.load_models()
@@ -222,6 +252,15 @@ class DetectionEngine:
         # 5. Apply Binary Overrides (Stage A: Pre-aggregation)
         risk_score, overrides = self.apply_binary_rules(features, base_score, channel, suppress_rules)
         overrides = overrides or []
+        
+        # 5.5 Threat Intel Lookup (Layer 2)
+        if raw_url and check_domain(urllib.parse.urlparse(raw_url).hostname):
+            overrides.append({
+                "id": "RULE_THREAT_INTEL",
+                "reason": "Domain verified as malicious by Threat Intelligence feeds.",
+                "force_severity": "CRITICAL"
+            })
+            risk_score = max(risk_score, 95.0)
         
         # Final Aggregation
         final_score = (risk_score * 0.6) + (min(struct_score, 100) * 0.4)

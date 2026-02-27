@@ -37,7 +37,8 @@ async def scan_artifact(request: ScanRequest, background_tasks: BackgroundTasks)
             channel=request.channel.value,
             metadata=request.metadata,
             background_tasks=background_tasks,
-            suppress_rules=request.suppress_rules
+            suppress_rules=request.suppress_rules,
+            device_id=request.device_id
         )
         
         # Format reasons inside Assessment block
@@ -116,6 +117,7 @@ async def get_history(
                 input_preview=item.get("input_preview", ""),
                 reasons=reasons,
                 latency_ms=item.get("latency_ms", 0),
+                device_id=item.get("device_id", "unknown_device"),
             ))
         
         return HistoryResponse(

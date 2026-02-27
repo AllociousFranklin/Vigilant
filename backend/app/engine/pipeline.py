@@ -15,6 +15,7 @@ from app.engine.detector import detection_engine
 from app.engine.explainer import generate_explanations
 from app.engine.policy import policy_engine
 from app.db.database import save_detection
+from app.engine.shadow import log_shadow_inference
 
 
 from fastapi import BackgroundTasks
@@ -44,7 +45,7 @@ def get_action_policy(severity_score: float, channel: str) -> dict:
     return {"recommended_action": action, "enforcement_mode": mode}
 
 
-async def enrich_detection(scan_id: str, artifact, suppress_rules: list = None):
+async def enrich_detection(scan_id: str, artifact, suppress_rules: list = None, device_id: str = None):
     """
     Background Task: Perform deep analysis (URL expansion) and update detection.
     This fulfills the 'Enriched' part of the confidence contract.
@@ -57,7 +58,12 @@ async def enrich_detection(scan_id: str, artifact, suppress_rules: list = None):
         features = extract_features(normalized, normalized.signals)
         
         # Layer 4: ML Detection (Base)
-        ml_result = detection_engine.predict(features, artifact.channel, suppress_rules)
+        ml_result = detection_engine.predict(
+            features=features, 
+            channel=artifact.channel, 
+            suppress_rules=suppress_rules,
+            raw_url=normalized.normalized_url or artifact.raw_input
+        )
         
         # Layer 5: Policy Assessment
         assessment_result = policy_engine.assess(features, ml_result["risk_score"], artifact.channel)
@@ -80,6 +86,7 @@ async def enrich_detection(scan_id: str, artifact, suppress_rules: list = None):
             "features_json": json.dumps(features),
             "latency_ms": 0, # Enriched latency is async
             "model_versions_json": json.dumps(ml_result["model_versions"]),
+            "device_id": device_id or "unknown_device",
         })
         print(f"[INFO] Scan {scan_id} enriched successfully.")
     except Exception as e:
@@ -88,7 +95,8 @@ async def enrich_detection(scan_id: str, artifact, suppress_rules: list = None):
 async def run_pipeline(url: str = None, text: str = None, html_body: str = None,
                        channel: str = "url", metadata: dict = None,
                        background_tasks: BackgroundTasks = None,
-                       suppress_rules: list = None) -> dict:
+                       suppress_rules: list = None,
+                       device_id: str = None) -> dict:
     """
     Execute the VIGILANT v2.0 Pipeline (Preliminary Stage).
     Returns a result in <50ms and schedules deep enrichment.
@@ -112,7 +120,12 @@ async def run_pipeline(url: str = None, text: str = None, html_body: str = None,
     
     # ---- 2️⃣ ASSESSMENT BLOCK (ML + Policy Interpretation) ----
     # 2a. ML Inference
-    ml_result = detection_engine.predict(features, channel, suppress_rules)
+    ml_result = detection_engine.predict(
+        features=features, 
+        channel=channel, 
+        suppress_rules=suppress_rules,
+        raw_url=normalized.normalized_url or artifact.raw_input
+    )
     
     # 2b. Policy Enforcement (Severity Floors & Threat Typing)
     assessment_result = policy_engine.assess(features, ml_result["risk_score"], channel)
@@ -122,6 +135,30 @@ async def run_pipeline(url: str = None, text: str = None, html_body: str = None,
     combined_context = {**ml_result, **assessment_result}
     raw_reasons = generate_explanations(features, combined_context, channel)
     
+    # ---- 2d. LAYER 7: SHADOW MODE TELEMETRY ----
+    # Evaluate what the adaptive "shadow" model would have scored.
+    # For now, it evaluates against the same loaded instance until memory routing is built,
+    # but the architectural hook enables Canary Deployments.
+    try:
+        # In a real deployment, detection_engine._shadow_predict(features) is used instead
+        shadow_ml = detection_engine.predict(
+            features=features, 
+            channel=channel, 
+            suppress_rules=suppress_rules,
+            raw_url=normalized.normalized_url or artifact.raw_input
+        )
+        shadow_assessment = policy_engine.assess(features, shadow_ml["risk_score"], channel)
+        
+        log_shadow_inference(
+            scan_id=scan_id, 
+            url=normalized.normalized_url or artifact.raw_input, 
+            channel=channel,
+            primary_res=assessment_result, 
+            shadow_res=shadow_assessment
+        )
+    except Exception as e:
+        print(f"[WARN] Shadow Mode Telemetry failed: {e}")
+        
     assessment_block = AssessmentBlock(
         risk_score=assessment_result["risk_score"],
         severity=assessment_result["severity"],
@@ -170,13 +207,14 @@ async def run_pipeline(url: str = None, text: str = None, html_body: str = None,
             "features_json": json.dumps(features),
             "latency_ms": latency_ms,
             "model_versions_json": json.dumps(ml_result["model_versions"]),
+            "device_id": device_id or "unknown_device",
         })
     except Exception as e:
         print(f"[WARN] Preliminary save failed: {e}")
     
     # Schedule Enrichment if pending
     if background_tasks and normalized.signals.get('expansion_pending'):
-        background_tasks.add_task(enrich_detection, scan_id, artifact, suppress_rules)
+        background_tasks.add_task(enrich_detection, scan_id, artifact, suppress_rules, device_id)
         response["processing_state"] = ProcessingState.ENRICHING
     
     return response

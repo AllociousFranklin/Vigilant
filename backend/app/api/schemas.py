@@ -30,6 +30,8 @@ class ThreatType(str, Enum):
     CREDENTIAL_HARVESTING = "CREDENTIAL_HARVESTING"
     MALWARE_DELIVERY = "MALWARE_DELIVERY"
     SUSPICIOUS_PROMOTION = "SUSPICIOUS_PROMOTION"
+    DOCUMENT_LURE = "DOCUMENT_LURE"
+    SOCIAL_ENGINEERING = "SOCIAL_ENGINEERING"
     UNKNOWN = "UNKNOWN"
     NONE = "NONE"
 
@@ -46,6 +48,7 @@ class ScanRequest(BaseModel):
     channel: Channel = Field(Channel.URL, description="Source channel")
     metadata: Optional[dict] = Field(None, description="Additional metadata (org_id, timestamp, etc.)")
     suppress_rules: Optional[list[str]] = Field(default_factory=list, description="List of Rule IDs to suppress")
+    device_id: Optional[str] = Field(None, description="Device UUID tracking")
 
 
 class ReasonDetail(BaseModel):
@@ -132,6 +135,7 @@ class HistoryItem(BaseModel):
     reasons: list[ReasonDetail]
     latency_ms: float
     threat_type: str = Field(default="UNKNOWN")
+    device_id: str = Field(default="unknown_device")
 
 
 class HistoryResponse(BaseModel):

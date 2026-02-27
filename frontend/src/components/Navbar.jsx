@@ -1,67 +1,127 @@
 import React from 'react';
-import { Shield, LayoutDashboard, Search, History, Info } from 'lucide-react';
+import { Shield, LayoutDashboard, Search, Clock, Layers, FileText } from 'lucide-react';
 
 const Navbar = ({ activePage, setActivePage }) => {
     const navItems = [
-        { id: 'dashboard', label: 'Dashboard', icon: LayoutDashboard },
-        { id: 'scanner', label: 'Scanner', icon: Search },
-        { id: 'history', label: 'History', icon: History },
-        { id: 'about', label: 'About', icon: Info },
+        { id: 'dashboard', label: 'Dashboard' },
+        { id: 'scanner', label: 'Scanner' },
+        { id: 'history', label: 'Threat Log' },
+        { id: 'about', label: 'Architecture' },
     ];
 
     return (
-        <nav className="glass" style={{
+        <nav style={{
             position: 'fixed',
-            top: '1.5rem',
-            left: '50%',
-            transform: 'translateX(-50%)',
-            width: 'max-content',
-            padding: '0.5rem',
+            top: 0,
+            left: 0,
+            right: 0,
+            height: '80px',
+            background: 'rgba(11, 15, 20, 0.85)',
+            backdropFilter: 'blur(20px)',
+            WebkitBackdropFilter: 'blur(20px)',
+            borderBottom: '1px solid var(--border-subtle)',
             display: 'flex',
-            gap: '0.5rem',
+            alignItems: 'center',
+            justifyContent: 'space-between',
+            padding: '0 3rem',
             zIndex: 1000,
         }}>
+            {/* Left: Brand */}
             <div style={{
                 display: 'flex',
                 alignItems: 'center',
-                padding: '0 1rem',
-                marginRight: '0.5rem',
-                borderRight: '1px solid var(--border)',
+                gap: '0.75rem',
             }}>
-                <Shield size={24} color="var(--accent)" style={{ marginRight: '0.75rem' }} />
-                <span style={{
-                    fontFamily: 'Outfit',
-                    fontWeight: 700,
-                    letterSpacing: '0.1em',
-                    color: 'var(--text-primary)'
-                }}>VIGILANT</span>
+                <Shield size={26} color="var(--accent)" strokeWidth={2.5} />
+                <div style={{ display: 'flex', flexDirection: 'column', lineHeight: 1.2 }}>
+                    <span style={{
+                        fontFamily: 'Outfit',
+                        fontWeight: 700,
+                        fontSize: '1.15rem',
+                        letterSpacing: '0.15em',
+                        color: 'var(--text-primary)'
+                    }}>VIGILANT</span>
+                    <span style={{
+                        fontSize: '0.65rem',
+                        color: 'var(--text-muted)',
+                        letterSpacing: '0.08em',
+                        textTransform: 'uppercase',
+                    }}>Policy-Enforced AI Defense</span>
+                </div>
             </div>
 
-            {navItems.map((item) => {
-                const Icon = item.icon;
-                const isActive = activePage === item.id;
+            {/* Center: Navigation */}
+            <div style={{
+                display: 'flex',
+                gap: '0.25rem',
+                alignItems: 'center',
+            }}>
+                {navItems.map((item) => {
+                    const isActive = activePage === item.id;
+                    return (
+                        <button
+                            key={item.id}
+                            onClick={() => setActivePage(item.id)}
+                            style={{
+                                position: 'relative',
+                                display: 'flex',
+                                alignItems: 'center',
+                                gap: '0.5rem',
+                                padding: '0.6rem 1.25rem',
+                                borderRadius: '0.5rem',
+                                background: 'transparent',
+                                color: isActive ? 'var(--accent)' : 'var(--text-secondary)',
+                                border: 'none',
+                                fontSize: '0.875rem',
+                                fontWeight: isActive ? 600 : 500,
+                                letterSpacing: '0.01em',
+                                transition: 'color 0.2s ease',
+                            }}
+                        >
+                            <span>{item.label}</span>
+                            {/* Subtle cyan underline indicator */}
+                            {isActive && (
+                                <div style={{
+                                    position: 'absolute',
+                                    bottom: '-2px',
+                                    left: '50%',
+                                    transform: 'translateX(-50%)',
+                                    width: '60%',
+                                    height: '2px',
+                                    background: 'var(--accent)',
+                                    borderRadius: '1px',
+                                    boxShadow: '0 0 8px var(--accent-glow)',
+                                }} />
+                            )}
+                        </button>
+                    );
+                })}
+            </div>
 
-                return (
-                    <button
-                        key={item.id}
-                        onClick={() => setActivePage(item.id)}
-                        style={{
-                            display: 'flex',
-                            alignItems: 'center',
-                            gap: '0.5rem',
-                            padding: '0.6rem 1.2rem',
-                            borderRadius: '0.75rem',
-                            background: isActive ? 'var(--accent)' : 'transparent',
-                            color: isActive ? 'var(--bg-deep)' : 'var(--text-secondary)',
-                            border: 'none',
-                            fontSize: '0.9rem',
-                        }}
-                    >
-                        <Icon size={18} />
-                        <span>{item.label}</span>
-                    </button>
-                );
-            })}
+            {/* Right: Environment Badge */}
+            <div style={{
+                display: 'flex',
+                alignItems: 'center',
+                gap: '0.75rem',
+            }}>
+                <div style={{
+                    display: 'flex',
+                    alignItems: 'center',
+                    gap: '0.5rem',
+                    padding: '0.4rem 1rem',
+                    background: 'var(--accent-dim)',
+                    border: '1px solid rgba(34, 211, 238, 0.15)',
+                    borderRadius: '100px',
+                    fontSize: '0.7rem',
+                    fontWeight: 600,
+                    letterSpacing: '0.08em',
+                    color: 'var(--accent)',
+                    textTransform: 'uppercase',
+                }}>
+                    <span className="status-dot operational" style={{ width: '6px', height: '6px' }}></span>
+                    Enterprise Console
+                </div>
+            </div>
         </nav>
     );
 };

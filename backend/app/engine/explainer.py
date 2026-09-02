@@ -1,221 +1,205 @@
-"""VIGILANT Engine - Layer 5: Explainability Engine
+"""SENTINEL Engine - Layer 6: Explainability & Chargeback Evidence Builder
 
-Translates model outputs into human-readable reasons.
-This is the enterprise trust layer — security teams act on reasons, not scores.
+Translates low-level feature signals and ML predictions into causally-linked,
+human-readable fraud evidence.
+Generates complete formal chargeback dispute response packages.
 """
+from typing import Dict, Any, List
+from app.api.schemas import ReasonDetail
 
-# Feature → Human-readable reason mapping
+
 FEATURE_REASON_MAP = {
-    # URL features
-    'url_length': {
-        'threshold': 75,
-        'reason': 'Unusually long URL detected ({value} characters)',
-        'category': 'URL Analysis',
+    'txn_count_1h': {
+        'threshold': 0.25,
+        'reason': 'Abnormal velocity: elevated transaction attempts within past 1 hour',
+        'category': 'Velocity',
     },
-    'url_has_ip': {
+    'txn_count_24h': {
+        'threshold': 0.35,
+        'reason': 'Sustained high transaction count over 24-hour window',
+        'category': 'Velocity',
+    },
+    'amount_zscore': {
+        'threshold': 2.0,
+        'reason': 'Transaction value deviates significantly from merchant baseline',
+        'category': 'Transaction',
+    },
+    'is_high_value': {
         'threshold': 0.5,
-        'reason': 'URL uses an IP address instead of a domain name',
-        'category': 'URL Analysis',
+        'reason': 'High-ticket transaction exceeding INR 50,000 threshold',
+        'category': 'Transaction',
     },
-    'url_suspicious_tld': {
+    'is_late_night': {
         'threshold': 0.5,
-        'reason': 'Suspicious top-level domain detected',
-        'category': 'URL Analysis',
+        'reason': 'Transaction executed during overnight window (1:00 AM - 5:00 AM)',
+        'category': 'Temporal',
     },
-    'url_brand_similarity': {
-        'threshold': 0.3,
-        'reason': 'Domain impersonation detected — resembles a known brand',
-        'category': 'Brand Impersonation',
-    },
-    'url_at_symbol': {
+    'is_first_time_card': {
         'threshold': 0.5,
-        'reason': 'URL contains @ symbol (potential redirect trick)',
-        'category': 'URL Analysis',
+        'reason': 'Payment instrument used for the first time on merchant account',
+        'category': 'Payment Instrument',
     },
-    'url_entropy': {
-        'threshold': 4.5,
-        'reason': 'High URL entropy suggests randomized/obfuscated content',
-        'category': 'URL Analysis',
+    'is_international': {
+        'threshold': 0.5,
+        'reason': 'Cross-border international payment routing',
+        'category': 'Payment Instrument',
     },
-    'url_has_https': {
-        'threshold': -0.1,  # triggers when value is 0 (no HTTPS)
-        'reason': 'No HTTPS encryption — connection is insecure',
-        'category': 'Security',
+    'card_bin_risk': {
+        'threshold': 0.30,
+        'reason': 'Card BIN prefix associated with elevated issuer dispute frequency',
+        'category': 'Payment Instrument',
+    },
+    'customer_dispute_rate': {
+        'threshold': 0.08,
+        'reason': 'Cardholder identity carries documented history of prior disputes/chargebacks',
+        'category': 'Customer Risk',
+    },
+    'email_domain_risk': {
+        'threshold': 0.50,
+        'reason': 'Customer email registered on disposable or high-risk domain',
+        'category': 'Customer Risk',
+    },
+    'phone_verified': {
+        'threshold': 0.5,
+        'reason': 'Customer mobile number lacks two-factor phone verification',
+        'category': 'Customer Risk',
         'inverse': True,
     },
-    'url_subdomain_depth': {
-        'threshold': 2,
-        'reason': 'Excessive subdomain depth ({value} levels) — potential obfuscation',
-        'category': 'URL Analysis',
-    },
-    'url_digit_ratio': {
-        'threshold': 0.3,
-        'reason': 'High digit ratio in URL suggests generated/obfuscated domain',
-        'category': 'URL Analysis',
-    },
-    
-    # NLP features
-    'nlp_urgency_score': {
-        'threshold': 0.3,
-        'reason': 'Urgency-based language detected — creates pressure to act',
-        'category': 'Social Engineering',
-    },
-    'nlp_threat_count': {
-        'threshold': 0.3,
-        'reason': 'Threatening or coercive language detected',
-        'category': 'Social Engineering',
-    },
-    'nlp_credential_count': {
-        'threshold': 0.3,
-        'reason': 'Credential harvesting intent detected — requests sensitive information',
-        'category': 'Credential Theft',
-    },
-    'nlp_action_count': {
-        'threshold': 0.3,
-        'reason': 'Suspicious call-to-action patterns detected',
-        'category': 'Social Engineering',
-    },
-    'nlp_caps_ratio': {
-        'threshold': 0.2,
-        'reason': 'Excessive use of ALL CAPS — common intimidation tactic',
-        'category': 'Social Engineering',
-    },
-    'nlp_sender_impersonation': {
-        'threshold': 0.3,
-        'reason': 'Content impersonates a known brand or organization',
-        'category': 'Brand Impersonation',
-    },
-    # REMOVED AI PATTERN SCORE AS IT'S NOISY
-    'nlp_exclamation_ratio': {
-        'threshold': 0.15,
-        'reason': 'Excessive exclamation marks — creates artificial urgency',
-        'category': 'Social Engineering',
-    },
-    
-    # Structural features
-    'struct_href_mismatch': {
-        'threshold': 0.1,
-        'reason': 'Displayed link text does not match actual URL destination',
-        'category': 'Deception',
-    },
-    'struct_has_login_form': {
+    'device_fingerprint_new': {
         'threshold': 0.5,
-        'reason': 'Login/credential form detected on suspicious page',
-        'category': 'Credential Theft',
+        'reason': 'Access originating from newly observed hardware fingerprint',
+        'category': 'Device Intelligence',
     },
-    'struct_hidden_ratio': {
-        'threshold': 0.1,
-        'reason': 'Hidden content detected — potential cloaking technique',
-        'category': 'Deception',
+    'ip_risk_score': {
+        'threshold': 0.40,
+        'reason': 'IP traffic routed via commercial VPN, datacenter proxy, or Tor exit',
+        'category': 'Network Intelligence',
     },
-    'text_unicode_noise': {
-        'threshold': 0.1,
-        'reason': 'Non-standard characters detected (often used to bypass text filters).',
-        'category': 'Obfuscation',
+    'geo_distance_score': {
+        'threshold': 0.40,
+        'reason': 'Geographic anomaly between IP geolocation and billing domicile',
+        'category': 'Network Intelligence',
     },
-    'url_homoglyph_count': {
-        'threshold': 0.1,
-        'reason': 'Homoglyph characters detected (visually similar characters used to deceive)',
-        'category': 'Obfuscation',
-    },
-    'struct_obfuscation_score': {
-        'threshold': 0.1,
-        'reason': 'URL obfuscation patterns detected (encoding, shortening, or punycode)',
-        'category': 'Obfuscation',
+    'billing_shipping_mismatch': {
+        'threshold': 0.5,
+        'reason': 'Billing jurisdiction diverges from physical delivery destination',
+        'category': 'Identity Verification',
     },
 }
 
-def get_signal_strength(measured_val: float, threshold: float, is_inverse: bool) -> str:
-    """Returns 'STRONG', 'MODERATE', or 'WEAK' based on feature intensity relative to threshold."""
-    if is_inverse:
-        intensity = 1.0 - measured_val
-    else:
-        # If threshold is very small, we avoid division heavily
-        if threshold <= 0:
-            intensity = measured_val * 2
-        else:
-            intensity = measured_val / threshold
 
-    if intensity > 2.5:
+def get_signal_strength(measured_val: float, threshold: float, is_inverse: bool = False) -> str:
+    """Determine signal strength: STRONG, MODERATE, or WEAK."""
+    if is_inverse:
+        intensity = (1.0 - measured_val) / max(1.0 - threshold, 0.1)
+    else:
+        intensity = measured_val / max(threshold, 0.01)
+
+    if intensity >= 2.0:
         return "STRONG"
-    elif intensity > 1.2:
+    elif intensity >= 1.2:
         return "MODERATE"
     else:
         return "WEAK"
 
-def generate_explanations(features: dict, assessment_context: dict, channel: str = "url") -> list[dict]:
+
+def generate_explanations(features: dict, assessment_context: dict) -> List[ReasonDetail]:
     """
-    Layer 5: Generate human-readable explanations.
-    Includes explicit channel-gating to prevent false explainability (like homoglyphs in SMS).
-    Maps signal strength instead of fake percentages.
+    Generate prioritized, human-readable evidence points from triggered signals.
     """
     reasons = []
-    
+
     # Priority 1: System Policy Overrides
     overrides = assessment_context.get('overrides') or []
     for ovr in overrides:
-        reasons.append({
-            'reason': f"{ovr['reason']}",
-            'confidence': 100.0,
-            'signal_strength': "STRONG",
-            'category': 'System Policy',
-            'id': ovr.get('id')
-        })
-        
-    URL_ONLY_CATEGORIES = {'URL Analysis', 'Brand Impersonation', 'Security'}
+        reasons.append(ReasonDetail(
+            reason=f"[POLICY OVERRIDE] {ovr['reason']}",
+            signal_strength="STRONG",
+            category=ovr.get('category', 'System Policy'),
+            feature_name=ovr.get('id'),
+        ))
 
-    for feature_name, mapping in FEATURE_REASON_MAP.items():
-        # CHANNEL FILTERING logic
-        category = mapping.get('category', '')
-        
-        # Flaw 2 Fix: Homoglyph detection scoped to channel
-        if channel != "url" and category in URL_ONLY_CATEGORIES:
-            continue
-        if channel != "url" and feature_name == "url_homoglyph_count":
-            continue
-        if channel == "url" and feature_name == "text_unicode_noise":
-            continue
-            
-        value = features.get(feature_name, 0)
+    # Priority 2: Feature-driven explanations
+    for feat_name, mapping in FEATURE_REASON_MAP.items():
+        val = float(features.get(feat_name, 0.0))
         threshold = mapping['threshold']
         is_inverse = mapping.get('inverse', False)
-        
-        # Check if feature exceeds threshold
-        triggered = False
-        if is_inverse:
-            triggered = value < 0.5
-        else:
-            triggered = value > threshold
-        
+
+        triggered = (val < threshold) if is_inverse else (val > threshold)
+
         if triggered:
-            signal_strength = get_signal_strength(value, threshold, is_inverse)
-            
-            # Format the reason with actual values where applicable
-            reason_text = mapping['reason']
-            if '{value}' in reason_text:
-                if isinstance(value, float) and value < 1:
-                    reason_text = reason_text.replace('{value}', f"{value:.2f}")
-                else:
-                    reason_text = reason_text.replace('{value}', str(int(value)))
-            
-            reasons.append({
-                'reason': reason_text,
-                'signal_strength': signal_strength,
-                'category': mapping['category'],
-            })
-    
-    # Sort logically: Strongest signals first
-    def strength_weight(r):
-        return {"STRONG": 3, "MODERATE": 2, "WEAK": 1}.get(r.get('signal_strength', 'WEAK'), 0)
-        
-    reasons.sort(key=strength_weight, reverse=True)
-    
-    # If no specific reasons but risk is high, append generic policy warning
-    if not reasons and assessment_context.get('risk_score', 0) > 50:
-         reasons.append({
-            'reason': 'Multiple subtle behavioral signals combine to indicate threat',
-            'signal_strength': 'MODERATE',
-            'category': 'Combined Analysis',
-        })
-    
+            strength = get_signal_strength(val, threshold, is_inverse)
+            reasons.append(ReasonDetail(
+                reason=mapping['reason'],
+                signal_strength=strength,
+                category=mapping['category'],
+                feature_name=feat_name,
+            ))
+
+    # Sort so STRONG signals appear first
+    strength_order = {"STRONG": 3, "MODERATE": 2, "WEAK": 1}
+    reasons.sort(key=lambda r: strength_order.get(r.signal_strength, 0), reverse=True)
+
+    if not reasons and assessment_context.get('fraud_score', 0) > 40:
+        reasons.append(ReasonDetail(
+            reason="Aggregated low-level behavioral signals indicate elevated anomaly risk",
+            signal_strength="MODERATE",
+            category="Combined Heuristics",
+            feature_name="ensemble_anomaly"
+        ))
+
     return reasons[:8]
+
+
+def generate_chargeback_evidence(assessment_data: dict, reasons: List[ReasonDetail]) -> str:
+    """
+    Generate an authoritative Chargeback Dispute Evidence document
+    formatted for submission to payment gateways (Razorpay/Visa/Mastercard/NPCI).
+    """
+    txn_id = assessment_data.get('transaction_id', 'N/A')
+    merchant_id = assessment_data.get('merchant_id', 'N/A')
+    amount = assessment_data.get('amount', 0.0)
+    currency = assessment_data.get('currency', 'INR')
+    timestamp = assessment_data.get('timestamp', 'N/A')
+    fraud_score = assessment_data.get('fraud_score', 0.0)
+    chargeback_score = assessment_data.get('chargeback_score', 0.0)
+    fraud_type = assessment_data.get('fraud_type', 'UNKNOWN')
+    risk_level = assessment_data.get('risk_level', 'HIGH')
+
+    evidence_lines = []
+    for r in reasons:
+        evidence_lines.append(f"  • [{r.signal_strength}] ({r.category}) {r.reason}")
+
+    evidence_list_str = "\n".join(evidence_lines) if evidence_lines else "  • No distinct anomalies recorded."
+
+    dispute_document = f"""================================================================================
+                    SENTINEL CHARGEBACK EVIDENCE DOSSIER
+================================================================================
+CASE REFERENCE        : DISPUTE-{txn_id}
+MERCHANT ID           : {merchant_id}
+TRANSACTION AMOUNT    : {currency} {amount:,.2f}
+ASSESSMENT TIMESTAMP  : {timestamp}
+FRAUD CLASSIFICATION  : {fraud_type}
+ASSESSED RISK LEVEL   : {risk_level} (Fraud: {fraud_score}/100, Chargeback Propensity: {chargeback_score}/100)
+
+--------------------------------------------------------------------------------
+1. FORENSIC EVIDENCE & TELEMETRY SIGNALS:
+--------------------------------------------------------------------------------
+{evidence_list_str}
+
+--------------------------------------------------------------------------------
+2. MERCHANT DEFENSE & REPRESENTMENT STATEMENT:
+--------------------------------------------------------------------------------
+The merchant respectfully submits that the cardholder/account authorization for 
+transaction {txn_id} was monitored by the SENTINEL Real-Time AI Risk Engine.
+
+At the time of purchase, multi-dimensional risk scoring verified telemetry across 
+device identity, IP reputation, velocity thresholds, and order fulfillment parameters.
+The automated decisioning recorded a risk assessment of {risk_level}. 
+
+Based on the forensic logs preserved above, the merchant requests that this dispute 
+be resolved in favor of the merchant in accordance with card network operating 
+regulations and BFSI chargeback representment guidelines.
+================================================================================
+"""
+    return dispute_document.strip()

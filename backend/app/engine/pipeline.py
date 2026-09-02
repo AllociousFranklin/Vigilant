@@ -1,220 +1,190 @@
-"""VIGILANT Engine - Pipeline Orchestrator
+"""SENTINEL Engine - Pipeline Orchestrator
 
-Chains all 6 layers together and measures latency.
-This is the single entry point for all scan requests.
+Chains all 6 layers together and measures latency:
+1. Ingestion & Validation
+2. Profile & Behavioral Enrichment
+3. 30-Dimension Feature Extraction
+4. Ensemble Fraud & Chargeback ML Scoring
+5. Policy Enforcement & Fraud Taxonomy
+6. Explainability & Chargeback Evidence Builder
 """
 import time
 import uuid
 import json
 from datetime import datetime, timezone
+from typing import Dict, Any
 
+from app.api.schemas import (
+    TransactionRequest, DetectionBlock, AssessmentBlock, DecisionBlock,
+    ReasonDetail
+)
 from app.engine.ingestion import ingest
-from app.engine.normalizer import normalize
-from app.engine.features import extract_features
-from app.engine.detector import detection_engine
-from app.engine.explainer import generate_explanations
+from app.engine.transaction_enricher import enrich
+from app.engine.features import extract_all_features
+from app.engine.detector import fraud_engine
 from app.engine.policy import policy_engine
-from app.db.database import save_detection
+from app.engine.explainer import generate_explanations, generate_chargeback_evidence
 from app.engine.shadow import log_shadow_inference
+from app.db.database import save_assessment
 
 
-from fastapi import BackgroundTasks
-from app.api.schemas import ProcessingState, Channel, DetectionBlock, AssessmentBlock, DecisionBlock, EnforcementMode
-
-# ... (omitting enrich_detection changes for a moment, let's focus on run_pipeline first, but we must update both conceptually)
-
-def get_action_policy(severity_score: float, channel: str) -> dict:
-    """Determine the recommended action and enforcement mode based on channel and severity."""
-    action = "ALLOW"
-    
-    if channel == "url" or channel == "html":
-        mode = EnforcementMode.PREVENTIVE
-        if severity_score >= 85:
-            action = "BLOCK"
-        elif severity_score >= 65:
-            action = "WARN"
-    else:
-        mode = EnforcementMode.ADVISORY
-        if severity_score >= 85:
-            action = "RECOMMEND_DELETION"
-        elif severity_score >= 65:
-            action = "HIGHLIGHT_WARNING"
-        elif severity_score >= 35:
-            action = "FLAG_FOR_REVIEW"
-            
-    return {"recommended_action": action, "enforcement_mode": mode}
-
-
-async def enrich_detection(scan_id: str, artifact, suppress_rules: list = None, device_id: str = None):
+async def score_transaction(request: TransactionRequest) -> dict:
     """
-    Background Task: Perform deep analysis (URL expansion) and update detection.
-    This fulfills the 'Enriched' part of the confidence contract.
-    """
-    try:
-        # Layer 2: Full Normalization (including expansion)
-        normalized = await normalize(artifact, skip_expansion=False)
-        
-        # Layer 3: Feature Extraction
-        features = extract_features(normalized, normalized.signals)
-        
-        # Layer 4: ML Detection (Base)
-        ml_result = detection_engine.predict(
-            features=features, 
-            channel=artifact.channel, 
-            suppress_rules=suppress_rules,
-            raw_url=normalized.normalized_url or artifact.raw_input
-        )
-        
-        # Layer 5: Policy Assessment
-        assessment_result = policy_engine.assess(features, ml_result["risk_score"], artifact.channel)
-        
-        # Explainability
-        reasons = generate_explanations(features, {**ml_result, **assessment_result}, artifact.channel)
-        
-        # Layer 6: Update DB
-        await save_detection({
-            "scan_id": scan_id,
-            "timestamp": datetime.now(timezone.utc).isoformat(),
-            "channel": artifact.channel,
-            "input_preview": artifact.input_preview,
-            "input_hash": artifact.input_hash,
-            "normalized_url": normalized.normalized_url,
-            "risk_score": assessment_result["risk_score"],
-            "severity": assessment_result["severity"].name,
-            "is_phishing": 1 if assessment_result["is_phishing"] else 0,
-            "reasons_json": json.dumps(reasons),
-            "features_json": json.dumps(features),
-            "latency_ms": 0, # Enriched latency is async
-            "model_versions_json": json.dumps(ml_result["model_versions"]),
-            "device_id": device_id or "unknown_device",
-        })
-        print(f"[INFO] Scan {scan_id} enriched successfully.")
-    except Exception as e:
-        print(f"[ERROR] Enrichment failed for {scan_id}: {e}")
-
-async def run_pipeline(url: str = None, text: str = None, html_body: str = None,
-                       channel: str = "url", metadata: dict = None,
-                       background_tasks: BackgroundTasks = None,
-                       suppress_rules: list = None,
-                       device_id: str = None) -> dict:
-    """
-    Execute the VIGILANT v2.0 Pipeline (Preliminary Stage).
-    Returns a result in <50ms and schedules deep enrichment.
+    Execute full SENTINEL fraud risk assessment pipeline.
+    Expected latency: sub-15ms.
     """
     start_time = time.perf_counter()
-    scan_id = str(uuid.uuid4())[:12]
-    
+    assessment_id = f"asm_{uuid.uuid4().hex[:12]}"
+    now_ts = datetime.now(timezone.utc).isoformat()
+
     # Layer 1: Ingestion
-    artifact = ingest(url=url, text=text, html_body=html_body, channel=channel, metadata=metadata)
-    
-    # Layer 2: Fast Normalization
-    normalized = await normalize(artifact, skip_expansion=True)
-    
-    # ---- 1️⃣ DETECTION BLOCK (Raw Signals) ----
-    features = extract_features(normalized, normalized.signals)
-    
+    ingested = ingest(request)
+
+    # Layer 2: Transaction & Profile Enrichment
+    enriched = enrich(ingested)
+
+    # Layer 3: Feature Extraction (30 dimensions)
+    enrichment_dict = {
+        'amount': enriched.amount,
+        'merchant_avg_txn': enriched.merchant_avg_txn,
+        'merchant_std_txn': enriched.merchant_std_txn,
+        'merchant_fraud_rate_30d': enriched.merchant_fraud_rate_30d,
+        'merchant_vintage_days': enriched.merchant_vintage_days,
+        'merchant_category': enriched.merchant_category,
+        'customer_account_age_days': enriched.customer_account_age_days,
+        'customer_total_txns': enriched.customer_total_txns,
+        'customer_dispute_rate': enriched.customer_dispute_rate,
+        'customer_email': enriched.customer_email,
+        'phone_verified': enriched.phone_verified,
+        'device_fingerprint_new': enriched.device_fingerprint_new,
+        'ip_risk_score': enriched.ip_risk_score,
+        'geo_distance_km': enriched.geo_distance_km,
+        'billing_shipping_mismatch': enriched.billing_shipping_mismatch,
+        'txn_count_1h': enriched.txn_count_1h,
+        'txn_count_24h': enriched.txn_count_24h,
+        'distinct_merchants_1h': enriched.distinct_merchants_1h,
+        'amount_sum_24h': enriched.amount_sum_24h,
+        'hour_of_day': enriched.hour_of_day,
+        'is_weekend': enriched.is_weekend,
+        'days_since_last_txn': enriched.days_since_last_txn,
+        'payment_method': enriched.payment_method,
+        'is_international': enriched.is_international,
+        'is_first_time_card': enriched.is_first_time_card,
+        'card_bin': enriched.card_bin,
+    }
+    features = extract_all_features(enrichment_dict)
+
+    # Layer 4: Ensemble ML Inference & Overrides
+    ml_result = fraud_engine.predict(
+        features=features,
+        card_bin=ingested.card_bin,
+        device_fingerprint=ingested.device_fingerprint
+    )
+
+    # Layer 5: Policy Assessment
+    policy_result = policy_engine.assess(
+        features=features,
+        fraud_score=ml_result["fraud_score"],
+        chargeback_score=ml_result["chargeback_score"],
+        overrides=ml_result["overrides"]
+    )
+
+    # Layer 6: Explainability & Chargeback Evidence Dossier
+    combined_context = {**ml_result, **policy_result}
+    reasons = generate_explanations(features, combined_context)
+
+    evidence_context = {
+        'transaction_id': ingested.transaction_id,
+        'merchant_id': ingested.merchant_id,
+        'amount': ingested.amount,
+        'currency': ingested.currency,
+        'timestamp': now_ts,
+        'fraud_score': policy_result["fraud_score"],
+        'chargeback_score': policy_result["chargeback_score"],
+        'fraud_type': policy_result["fraud_type"].value,
+        'risk_level': policy_result["risk_level"].value,
+    }
+    evidence_text = generate_chargeback_evidence(evidence_context, reasons)
+
+    # Measure latency
+    latency_ms = round((time.perf_counter() - start_time) * 1000.0, 2)
+
+    # Blocks construction
     detection_block = DetectionBlock(
         features=features,
-        normalized_url=normalized.normalized_url
+        enrichment_signals=enriched.signals
     )
-    
-    # ---- 2️⃣ ASSESSMENT BLOCK (ML + Policy Interpretation) ----
-    # 2a. ML Inference
-    ml_result = detection_engine.predict(
-        features=features, 
-        channel=channel, 
-        suppress_rules=suppress_rules,
-        raw_url=normalized.normalized_url or artifact.raw_input
+
+    assessment_block = AssessmentBlock(
+        fraud_score=policy_result["fraud_score"],
+        chargeback_score=policy_result["chargeback_score"],
+        risk_level=policy_result["risk_level"],
+        fraud_type=policy_result["fraud_type"],
+        is_fraudulent=policy_result["is_fraudulent"],
+        reasons=reasons,
+        confidence_band=policy_result["confidence_band"],
+        policy_version=policy_result["policy_version"],
+        model_version=f"fraud:{ml_result['model_versions']['fraud_model']},cb:{ml_result['model_versions']['chargeback_model']}"
     )
-    
-    # 2b. Policy Enforcement (Severity Floors & Threat Typing)
-    assessment_result = policy_engine.assess(features, ml_result["risk_score"], channel)
-    
-    # 2c. Explainability
-    # Explainer needs overrides from ML, plus we need to map confidence strings
-    combined_context = {**ml_result, **assessment_result}
-    raw_reasons = generate_explanations(features, combined_context, channel)
-    
-    # ---- 2d. LAYER 7: SHADOW MODE TELEMETRY ----
-    # Evaluate what the adaptive "shadow" model would have scored.
-    # For now, it evaluates against the same loaded instance until memory routing is built,
-    # but the architectural hook enables Canary Deployments.
+
+    decision_block = DecisionBlock(
+        recommended_action=policy_result["recommended_action"],
+        chargeback_evidence=evidence_text
+    )
+
+    # Shadow Mode Telemetry (Async-safe logging)
     try:
-        # In a real deployment, detection_engine._shadow_predict(features) is used instead
-        shadow_ml = detection_engine.predict(
-            features=features, 
-            channel=channel, 
-            suppress_rules=suppress_rules,
-            raw_url=normalized.normalized_url or artifact.raw_input
-        )
-        shadow_assessment = policy_engine.assess(features, shadow_ml["risk_score"], channel)
-        
         log_shadow_inference(
-            scan_id=scan_id, 
-            url=normalized.normalized_url or artifact.raw_input, 
-            channel=channel,
-            primary_res=assessment_result, 
-            shadow_res=shadow_assessment
+            assessment_id=assessment_id,
+            transaction_id=ingested.transaction_id,
+            payment_method=ingested.payment_method,
+            primary_res=policy_result,
+            shadow_res=policy_result
         )
     except Exception as e:
-        print(f"[WARN] Shadow Mode Telemetry failed: {e}")
-        
-    assessment_block = AssessmentBlock(
-        risk_score=assessment_result["risk_score"],
-        severity=assessment_result["severity"],
-        threat_type=assessment_result["threat_type"],
-        is_phishing=assessment_result["is_phishing"],
-        reasons=raw_reasons,
-        confidence_band=assessment_result["confidence_band"],
-        policy_version=assessment_result["policy_version"],
-        model_version=f"url:{ml_result['model_versions']['url_model']},nlp:{ml_result['model_versions']['nlp_model']}"
-    )
-    
-    # ---- 3️⃣ DECISION BLOCK (Action Recommendation) ----
-    action_policy = get_action_policy(assessment_result["risk_score"], channel)
-    decision_block = DecisionBlock(
-        recommended_action=action_policy["recommended_action"],
-        enforcement_mode=action_policy["enforcement_mode"]
-    )
-    
-    # Latency check
-    latency_ms = round((time.perf_counter() - start_time) * 1000, 2)
-    
-    # Build explicit response dict for router
-    response = {
-        "scan_id": scan_id,
-        "channel": channel,
+        print(f"[WARN] Shadow mode telemetry skipped: {e}")
+
+    # Persistence to SQLite
+    try:
+        await save_assessment({
+            "assessment_id": assessment_id,
+            "timestamp": now_ts,
+            "merchant_id": ingested.merchant_id,
+            "transaction_id": ingested.transaction_id,
+            "amount": ingested.amount,
+            "currency": ingested.currency,
+            "payment_method": ingested.payment_method,
+            "customer_id": ingested.customer_id,
+            "fraud_score": policy_result["fraud_score"],
+            "chargeback_score": policy_result["chargeback_score"],
+            "risk_level": policy_result["risk_level"].value,
+            "fraud_type": policy_result["fraud_type"].value,
+            "is_fraudulent": 1 if policy_result["is_fraudulent"] else 0,
+            "recommended_action": policy_result["recommended_action"].value,
+            "reasons_json": json.dumps([r.model_dump() for r in reasons]),
+            "features_json": json.dumps(features),
+            "chargeback_evidence": evidence_text,
+            "latency_ms": latency_ms,
+            "model_versions_json": json.dumps(ml_result["model_versions"]),
+            "device_fingerprint": ingested.device_fingerprint or "unknown_device",
+        })
+    except Exception as e:
+        print(f"[WARN] Assessment database save failed: {e}")
+
+    return {
+        "assessment_id": assessment_id,
+        "merchant_id": ingested.merchant_id,
+        "amount": ingested.amount,
+        "currency": ingested.currency,
         "latency_ms": latency_ms,
-        "processing_state": ProcessingState.PRELIMINARY if normalized.signals.get('expansion_pending') else ProcessingState.FINAL,
         "detection": detection_block,
         "assessment": assessment_block,
         "decision": decision_block,
+        # Top-level bridge fields
+        "fraud_score": policy_result["fraud_score"],
+        "chargeback_score": policy_result["chargeback_score"],
+        "risk_level": policy_result["risk_level"],
+        "is_fraudulent": policy_result["is_fraudulent"],
+        "reasons": reasons,
+        "features": features,
     }
-    
-    # Layer 6: Store Preliminary Result
-    try:
-        await save_detection({
-            "scan_id": scan_id,
-            "timestamp": datetime.now(timezone.utc).isoformat(),
-            "channel": channel,
-            "input_preview": artifact.input_preview,
-            "input_hash": artifact.input_hash,
-            "normalized_url": normalized.normalized_url,
-            "risk_score": assessment_result["risk_score"],
-            "severity": assessment_result["severity"].name, # stringify enum
-            "is_phishing": 1 if assessment_result["is_phishing"] else 0,
-            "reasons_json": json.dumps(raw_reasons),
-            "features_json": json.dumps(features),
-            "latency_ms": latency_ms,
-            "model_versions_json": json.dumps(ml_result["model_versions"]),
-            "device_id": device_id or "unknown_device",
-        })
-    except Exception as e:
-        print(f"[WARN] Preliminary save failed: {e}")
-    
-    # Schedule Enrichment if pending
-    if background_tasks and normalized.signals.get('expansion_pending'):
-        background_tasks.add_task(enrich_detection, scan_id, artifact, suppress_rules, device_id)
-        response["processing_state"] = ProcessingState.ENRICHING
-    
-    return response

@@ -1,4 +1,4 @@
-"""VIGILANT - FastAPI Application Entry Point"""
+"""SENTINEL - FastAPI Application Entry Point"""
 from contextlib import asynccontextmanager
 from fastapi import FastAPI, Request
 from fastapi.responses import JSONResponse
@@ -8,7 +8,6 @@ from app.core.config import settings
 from app.api.routes import router
 from app.api.dashboard import dashboard_router
 from app.db.database import init_db
-from app.engine.detector import detection_engine
 
 
 @asynccontextmanager
@@ -16,7 +15,7 @@ async def lifespan(app: FastAPI):
     """Startup and shutdown events."""
     # Startup
     print("=" * 60)
-    print(f"  🛡️  VIGILANT v{settings.APP_VERSION}")
+    print(f"  🛡️  SENTINEL v{settings.APP_VERSION}")
     print(f"  {settings.APP_DESCRIPTION}")
     print("=" * 60)
     
@@ -25,17 +24,22 @@ async def lifespan(app: FastAPI):
     print("[✓] Database initialized")
     
     # Load ML models
-    detection_engine.load_models()
-    print(f"[✓] URL model: {detection_engine.url_model_version}")
-    print(f"[✓] NLP model: {detection_engine.nlp_model_version}")
+    try:
+        from app.engine.detector import fraud_engine
+        fraud_engine.load_models()
+        print(f"[✓] Fraud model: {fraud_engine.fraud_model_version}")
+        print(f"[✓] Chargeback model: {fraud_engine.chargeback_model_version}")
+    except Exception as e:
+        print(f"[!] Model loading deferred: {e}")
+
     print("=" * 60)
-    print("[✓] VIGILANT is ready for threat detection")
+    print("[✓] SENTINEL is ready for fraud detection")
     print("=" * 60)
     
     yield
     
     # Shutdown
-    print("[✓] VIGILANT shutting down")
+    print("[✓] SENTINEL shutting down")
 
 
 app = FastAPI(
@@ -55,8 +59,6 @@ app.add_middleware(
 )
 
 from fastapi.exceptions import RequestValidationError
-from fastapi import Request
-from fastapi.responses import JSONResponse
 
 @app.exception_handler(RequestValidationError)
 async def validation_exception_handler(request: Request, exc: RequestValidationError):
@@ -84,9 +86,9 @@ app.include_router(dashboard_router, prefix=f"{settings.API_PREFIX}/dashboard", 
 @app.get("/")
 async def root():
     return {
-        "service": "VIGILANT",
+        "service": "SENTINEL",
         "description": settings.APP_DESCRIPTION,
         "version": settings.APP_VERSION,
         "docs": "/docs",
-        "api": f"{settings.API_PREFIX}/scan",
+        "api": f"{settings.API_PREFIX}/assess",
     }

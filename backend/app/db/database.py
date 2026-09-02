@@ -1,122 +1,123 @@
-"""VIGILANT - Database Layer (SQLite with aiosqlite)"""
+"""SENTINEL - Database Layer (SQLite with aiosqlite)"""
 import aiosqlite
-import os
 from app.core.config import settings
-
 
 DB_PATH = settings.DB_PATH
 
 
-async def init_db():
-    """Initialize the database and create tables if they don't exist."""
-    async with aiosqlite.connect(DB_PATH) as db:
-        await db.execute("""
-            CREATE TABLE IF NOT EXISTS detections (
-                scan_id TEXT PRIMARY KEY,
-                timestamp TEXT NOT NULL,
-                channel TEXT NOT NULL,
-                input_preview TEXT,
-                input_hash TEXT,
-                normalized_url TEXT,
-                risk_score REAL NOT NULL,
-                severity TEXT NOT NULL,
-                is_phishing INTEGER NOT NULL,
-                reasons_json TEXT,
-                features_json TEXT,
-                latency_ms REAL,
-                model_versions_json TEXT,
-                device_id TEXT DEFAULT 'unknown_device'
-            )
-        """)
-        try:
-            await db.execute("ALTER TABLE detections ADD COLUMN device_id TEXT DEFAULT 'unknown_device'")
-        except Exception:
-            pass
-        await db.execute("""
-            CREATE TABLE IF NOT EXISTS feedback (
-                id INTEGER PRIMARY KEY AUTOINCREMENT,
-                scan_id TEXT NOT NULL,
-                verdict TEXT NOT NULL,
-                notes TEXT,
-                timestamp TEXT NOT NULL,
-                FOREIGN KEY (scan_id) REFERENCES detections(scan_id)
-            )
-        """)
-        await db.execute("""
-            CREATE INDEX IF NOT EXISTS idx_detections_timestamp ON detections(timestamp)
-        """)
-        await db.execute("""
-            CREATE INDEX IF NOT EXISTS idx_detections_severity ON detections(severity)
-        """)
-        await db.commit()
-
-
 async def get_db():
-    """Get a database connection."""
+    """Get an aiosqlite database connection."""
     db = await aiosqlite.connect(DB_PATH)
     db.row_factory = aiosqlite.Row
     return db
 
 
-async def save_detection(detection: dict):
-    """Save a detection result to the database."""
+async def init_db():
+    """Initialize the database and create tables."""
     async with aiosqlite.connect(DB_PATH) as db:
         await db.execute("""
-            INSERT OR REPLACE INTO detections (scan_id, timestamp, channel, input_preview, input_hash,
-                                     normalized_url, risk_score, severity, is_phishing,
-                                     reasons_json, features_json, latency_ms, model_versions_json, device_id)
-            VALUES (:scan_id, :timestamp, :channel, :input_preview, :input_hash,
-                    :normalized_url, :risk_score, :severity, :is_phishing,
-                    :reasons_json, :features_json, :latency_ms, :model_versions_json, :device_id)
-        """, detection)
+            CREATE TABLE IF NOT EXISTS assessments (
+                assessment_id TEXT PRIMARY KEY,
+                timestamp TEXT NOT NULL,
+                merchant_id TEXT NOT NULL,
+                transaction_id TEXT,
+                amount REAL NOT NULL,
+                currency TEXT DEFAULT 'INR',
+                payment_method TEXT NOT NULL,
+                customer_id TEXT,
+                fraud_score REAL NOT NULL,
+                chargeback_score REAL NOT NULL,
+                risk_level TEXT NOT NULL,
+                fraud_type TEXT NOT NULL,
+                is_fraudulent INTEGER NOT NULL,
+                recommended_action TEXT NOT NULL,
+                reasons_json TEXT,
+                features_json TEXT,
+                chargeback_evidence TEXT,
+                latency_ms REAL,
+                model_versions_json TEXT,
+                device_fingerprint TEXT
+            )
+        """)
+        await db.execute("""
+            CREATE TABLE IF NOT EXISTS outcomes (
+                id INTEGER PRIMARY KEY AUTOINCREMENT,
+                assessment_id TEXT NOT NULL,
+                transaction_id TEXT,
+                outcome TEXT NOT NULL,
+                notes TEXT,
+                timestamp TEXT NOT NULL,
+                FOREIGN KEY (assessment_id) REFERENCES assessments(assessment_id)
+            )
+        """)
+        await db.execute("""
+            CREATE INDEX IF NOT EXISTS idx_assessments_timestamp ON assessments(timestamp)
+        """)
+        await db.execute("""
+            CREATE INDEX IF NOT EXISTS idx_assessments_risk ON assessments(risk_level)
+        """)
+        await db.execute("""
+            CREATE INDEX IF NOT EXISTS idx_assessments_merchant ON assessments(merchant_id)
+        """)
         await db.commit()
 
 
-async def save_feedback(feedback: dict):
-    """Save analyst feedback."""
+async def save_assessment(assessment: dict):
+    """Save a fraud risk assessment to the database."""
     async with aiosqlite.connect(DB_PATH) as db:
         await db.execute("""
-            INSERT INTO feedback (scan_id, verdict, notes, timestamp)
-            VALUES (:scan_id, :verdict, :notes, :timestamp)
-        """, feedback)
+            INSERT OR REPLACE INTO assessments 
+            (assessment_id, timestamp, merchant_id, transaction_id, amount, currency,
+             payment_method, customer_id, fraud_score, chargeback_score, risk_level,
+             fraud_type, is_fraudulent, recommended_action, reasons_json, features_json,
+             chargeback_evidence, latency_ms, model_versions_json, device_fingerprint)
+            VALUES (:assessment_id, :timestamp, :merchant_id, :transaction_id, :amount,
+                    :currency, :payment_method, :customer_id, :fraud_score, :chargeback_score,
+                    :risk_level, :fraud_type, :is_fraudulent, :recommended_action, :reasons_json,
+                    :features_json, :chargeback_evidence, :latency_ms, :model_versions_json,
+                    :device_fingerprint)
+        """, assessment)
         await db.commit()
 
 
-async def get_detections(page: int = 1, page_size: int = 20, severity: str = None, channel: str = None):
-    """Get paginated detection history."""
+async def save_outcome(outcome: dict):
+    """Save chargeback outcome feedback."""
+    async with aiosqlite.connect(DB_PATH) as db:
+        await db.execute("""
+            INSERT INTO outcomes (assessment_id, transaction_id, outcome, notes, timestamp)
+            VALUES (:assessment_id, :transaction_id, :outcome, :notes, :timestamp)
+        """, outcome)
+        await db.commit()
+
+
+async def get_assessments(page: int = 1, page_size: int = 20, risk_level: str = None, merchant_id: str = None):
+    """Get paginated assessment history."""
     async with aiosqlite.connect(DB_PATH) as db:
         db.row_factory = aiosqlite.Row
-        
         where_clauses = []
         params = {}
-        
-        if severity:
-            where_clauses.append("severity = :severity")
-            params["severity"] = severity
-        if channel:
-            where_clauses.append("channel = :channel")
-            params["channel"] = channel
-        
+        if risk_level:
+            where_clauses.append("risk_level = :risk_level")
+            params["risk_level"] = risk_level
+        if merchant_id:
+            where_clauses.append("merchant_id = :merchant_id")
+            params["merchant_id"] = merchant_id
         where_sql = f"WHERE {' AND '.join(where_clauses)}" if where_clauses else ""
-        
-        # Get total count
+
         count_row = await db.execute_fetchall(
-            f"SELECT COUNT(*) as cnt FROM detections {where_sql}", params
+            f"SELECT COUNT(*) as cnt FROM assessments {where_sql}", params
         )
         total = count_row[0][0] if count_row else 0
-        
-        # Get paginated results
+
         offset = (page - 1) * page_size
         params["limit"] = page_size
         params["offset"] = offset
-        
         rows = await db.execute_fetchall(
-            f"""SELECT * FROM detections {where_sql}
+            f"""SELECT * FROM assessments {where_sql}
                 ORDER BY timestamp DESC
                 LIMIT :limit OFFSET :offset""",
             params
         )
-        
         return [dict(row) for row in rows], total
 
 
@@ -124,55 +125,53 @@ async def get_stats():
     """Get dashboard statistics."""
     async with aiosqlite.connect(DB_PATH) as db:
         db.row_factory = aiosqlite.Row
-        
-        # Total scans
-        row = await db.execute_fetchall("SELECT COUNT(*) as cnt FROM detections")
-        total_scans = row[0][0] if row else 0
-        
-        # Threats detected
-        row = await db.execute_fetchall("SELECT COUNT(*) as cnt FROM detections WHERE is_phishing = 1")
-        threats = row[0][0] if row else 0
-        
-        # Average latency
-        row = await db.execute_fetchall("SELECT AVG(latency_ms) as avg_lat FROM detections")
+
+        row = await db.execute_fetchall("SELECT COUNT(*) as cnt FROM assessments")
+        total = row[0][0] if row else 0
+
+        row = await db.execute_fetchall("SELECT COUNT(*) as cnt FROM assessments WHERE is_fraudulent = 1")
+        frauds = row[0][0] if row else 0
+
+        row = await db.execute_fetchall("SELECT COALESCE(SUM(amount), 0) as total FROM assessments WHERE is_fraudulent = 1")
+        amount_protected = round(row[0][0], 2) if row else 0.0
+
+        row = await db.execute_fetchall("SELECT AVG(latency_ms) as avg_lat FROM assessments")
         avg_latency = round(row[0][0], 2) if row and row[0][0] else 0.0
-        
-        # False positive rate (from feedback)
+
         fp_row = await db.execute_fetchall(
-            "SELECT COUNT(*) as cnt FROM feedback WHERE verdict = 'false_positive'"
+            "SELECT COUNT(*) as cnt FROM outcomes WHERE outcome = 'legitimate'"
         )
         fp_count = fp_row[0][0] if fp_row else 0
-        fp_rate = round((fp_count / threats * 100) if threats > 0 else 0.0, 2)
-        
-        # Severity distribution
-        sev_rows = await db.execute_fetchall(
-            "SELECT severity, COUNT(*) as cnt FROM detections GROUP BY severity"
+        fp_rate = round((fp_count / frauds * 100) if frauds > 0 else 0.0, 2)
+
+        risk_rows = await db.execute_fetchall(
+            "SELECT risk_level, COUNT(*) as cnt FROM assessments GROUP BY risk_level"
         )
-        severity_dist = {row[0]: row[1] for row in sev_rows}
-        
-        # Channel distribution
-        chan_rows = await db.execute_fetchall(
-            "SELECT channel, COUNT(*) as cnt FROM detections GROUP BY channel"
+        risk_dist = {row[0]: row[1] for row in risk_rows}
+
+        pm_rows = await db.execute_fetchall(
+            "SELECT payment_method, COUNT(*) as cnt FROM assessments GROUP BY payment_method"
         )
-        channel_dist = {row[0]: row[1] for row in chan_rows}
-        
-        # Recent trend (last 7 days aggregated by date)
+        pm_dist = {row[0]: row[1] for row in pm_rows}
+
         trend_rows = await db.execute_fetchall("""
             SELECT DATE(timestamp) as date, COUNT(*) as total,
-                   SUM(CASE WHEN is_phishing = 1 THEN 1 ELSE 0 END) as threats
-            FROM detections
+                   SUM(CASE WHEN is_fraudulent = 1 THEN 1 ELSE 0 END) as frauds,
+                   SUM(CASE WHEN is_fraudulent = 1 THEN amount ELSE 0 END) as amount_blocked
+            FROM assessments
             GROUP BY DATE(timestamp)
             ORDER BY date DESC
             LIMIT 7
         """)
-        trend = [{"date": row[0], "total": row[1], "threats": row[2]} for row in trend_rows]
-        
+        trend = [{"date": row[0], "total": row[1], "frauds": row[2], "amount_blocked": row[3]} for row in trend_rows]
+
         return {
-            "total_scans": total_scans,
-            "threats_detected": threats,
+            "total_assessments": total,
+            "frauds_detected": frauds,
+            "total_amount_protected": amount_protected,
             "avg_latency_ms": avg_latency,
             "false_positive_rate": fp_rate,
-            "severity_distribution": severity_dist,
-            "channel_distribution": channel_dist,
+            "risk_distribution": risk_dist,
+            "payment_method_distribution": pm_dist,
             "recent_trend": list(reversed(trend)),
         }

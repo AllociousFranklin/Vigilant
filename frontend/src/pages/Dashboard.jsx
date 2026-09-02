@@ -1,36 +1,40 @@
 import React, { useState, useEffect } from 'react';
 import { motion } from 'framer-motion';
-import { Shield, ShieldAlert, Zap, Target, TrendingUp } from 'lucide-react';
+import { ShieldCheck, ShieldAlert, Zap, IndianRupee, Clock, TrendingUp, RefreshCw } from 'lucide-react';
 import { AreaChart, Area, XAxis, YAxis, CartesianGrid, Tooltip, ResponsiveContainer, PieChart, Pie, Cell } from 'recharts';
-import { vigilantApi } from '../utils/api';
+import { sentinelApi } from '../utils/api';
 
-const StatCard = ({ title, value, icon: Icon, color, trend }) => (
+const StatCard = ({ title, value, icon: Icon, color, subtext }) => (
     <motion.div
         whileHover={{ y: -3 }}
         className="elevated-card"
-        style={{ padding: '1.5rem', flex: 1, minWidth: '220px' }}
+        style={{
+            background: 'var(--bg-card)',
+            padding: '1.5rem',
+            borderRadius: '16px',
+            border: '1px solid var(--border-subtle)',
+            flex: 1,
+            minWidth: '220px',
+        }}
     >
         <div style={{ display: 'flex', justifyContent: 'space-between', marginBottom: '1rem' }}>
-            <div style={{ padding: '0.6rem', background: `${color}15`, borderRadius: '0.5rem', color: color }}>
-                <Icon size={20} />
+            <div style={{ padding: '0.6rem', background: `${color}15`, borderRadius: '10px', color: color }}>
+                <Icon size={22} />
             </div>
-            {trend && (
-                <div style={{
-                    display: 'flex', alignItems: 'center', gap: '0.25rem',
-                    color: trend > 0 ? 'var(--success)' : 'var(--danger)',
-                    fontSize: '0.8rem', fontWeight: 600,
-                    fontFamily: 'JetBrains Mono, monospace',
-                }}>
-                    <TrendingUp size={12} />
-                    {trend}%
-                </div>
+            {subtext && (
+                <span style={{ fontSize: '0.75rem', color: 'var(--text-muted)', fontFamily: 'JetBrains Mono' }}>
+                    {subtext}
+                </span>
             )}
         </div>
         <div style={{
-            fontSize: '1.75rem', fontWeight: 700, marginBottom: '0.25rem',
+            fontSize: '1.85rem',
+            fontWeight: 800,
+            marginBottom: '0.25rem',
             fontFamily: 'Outfit, sans-serif',
+            color: 'var(--text-primary)',
         }}>{value}</div>
-        <div style={{ color: 'var(--text-muted)', fontSize: '0.8rem', textTransform: 'uppercase', letterSpacing: '0.06em', fontWeight: 500 }}>{title}</div>
+        <div style={{ color: 'var(--text-muted)', fontSize: '0.8rem', textTransform: 'uppercase', letterSpacing: '0.06em', fontWeight: 600 }}>{title}</div>
     </motion.div>
 );
 
@@ -38,143 +42,222 @@ const Dashboard = () => {
     const [stats, setStats] = useState(null);
     const [loading, setLoading] = useState(true);
 
+    const fetchStats = async () => {
+        setLoading(true);
+        try {
+            const data = await sentinelApi.getStats();
+            setStats(data);
+        } catch (err) {
+            console.error('Failed to fetch stats:', err);
+        } finally {
+            setLoading(false);
+        }
+    };
+
     useEffect(() => {
-        const fetchStats = async () => {
-            try {
-                const data = await vigilantApi.getStats();
-                setStats(data);
-            } catch (err) {
-                console.error('Failed to fetch stats:', err);
-            } finally {
-                setLoading(false);
-            }
-        };
         fetchStats();
     }, []);
 
-    if (loading) return (
-        <div className="flex-center" style={{ height: '80vh', color: 'var(--text-muted)', flexDirection: 'column', gap: '1rem' }}>
-            <div className="spinner" style={{ width: '32px', height: '32px', border: '3px solid var(--border)', borderTop: '3px solid var(--accent)', borderRadius: '50%' }} />
-            <span style={{ fontSize: '0.85rem' }}>Loading analytical data...</span>
+    if (loading && !stats) return (
+        <div className="flex-center" style={{ height: '80vh', color: 'var(--text-muted)', flexDirection: 'column', gap: '1rem', paddingTop: '100px' }}>
+            <RefreshCw size={32} className="spinner" />
+            <span style={{ fontSize: '0.9rem' }}>Connecting to SENTINEL BFSI Analytics...</span>
         </div>
     );
 
-    const chartData = (stats?.recent_trend?.length > 0) ? stats.recent_trend : [
-        { date: '2024-03-20', total: 45, threats: 12 },
-        { date: '2024-03-21', total: 52, threats: 15 },
-        { date: '2024-03-22', total: 38, threats: 8 },
-        { date: '2024-03-23', total: 65, threats: 24 },
-        { date: '2024-03-24', total: 48, threats: 14 },
-        { date: '2024-03-25', total: 72, threats: 31 },
-        { date: '2024-03-26', total: 58, threats: 19 },
-    ];
+    const riskColors = {
+        CRITICAL: '#FF1E56',
+        HIGH: 'var(--danger)',
+        MEDIUM: 'var(--warning)',
+        LOW: 'var(--success)',
+    };
 
-    const displaySeverityData = [
-        { name: 'CRITICAL', value: stats?.severity_distribution?.CRITICAL || 15, color: '#be123c' },
-        { name: 'HIGH', value: stats?.severity_distribution?.HIGH || 25, color: '#EF4444' },
-        { name: 'MEDIUM', value: stats?.severity_distribution?.MEDIUM || 35, color: '#FACC15' },
-        { name: 'LOW', value: stats?.severity_distribution?.LOW || 25, color: '#22C55E' },
+    const pieData = stats?.risk_distribution ? Object.keys(stats.risk_distribution).map(k => ({
+        name: k,
+        value: stats.risk_distribution[k],
+        color: riskColors[k] || 'var(--accent)',
+    })) : [];
+
+    const trendData = stats?.recent_trend?.length ? stats.recent_trend : [
+        { date: 'Day 1', total: 12, frauds: 3, amount_blocked: 45000 },
+        { date: 'Day 2', total: 18, frauds: 4, amount_blocked: 89000 },
+        { date: 'Day 3', total: 25, frauds: 6, amount_blocked: 124000 },
+        { date: 'Day 4', total: 31, frauds: 8, amount_blocked: 168000 },
+        { date: 'Day 5', total: 42, frauds: 9, amount_blocked: 215000 },
+        { date: 'Day 6', total: 38, frauds: 7, amount_blocked: 182000 },
+        { date: 'Today', total: stats?.total_assessments || 45, frauds: stats?.frauds_detected || 11, amount_blocked: stats?.total_amount_protected || 250000 },
     ];
 
     return (
-        <div style={{ paddingTop: '120px', paddingBottom: '4rem' }}>
-            <header style={{ marginBottom: '2.5rem' }}>
-                <h1 style={{ fontSize: '2rem', marginBottom: '0.35rem' }}>
-                    Security <span style={{ color: 'var(--accent)' }}>Overview</span>
-                </h1>
-                <p style={{ color: 'var(--text-muted)', fontSize: '0.9rem' }}>
-                    Real-time monitoring of phishing attempt patterns and system performance.
-                </p>
-            </header>
-
-            {/* Stats Grid */}
-            <div style={{ display: 'grid', gridTemplateColumns: 'repeat(4, 1fr)', gap: '1rem', marginBottom: '2rem' }}>
-                <StatCard title="Total Scans" value={stats?.total_scans || 0} icon={Shield} color="var(--accent)" trend={12} />
-                <StatCard title="Threats Blocked" value={stats?.threats_detected || 0} icon={ShieldAlert} color="var(--danger)" trend={8} />
-                <StatCard title="Avg Latency" value={`${stats?.avg_latency_ms || 0}ms`} icon={Zap} color="var(--warning)" />
-                <StatCard title="Accuracy Rate" value="98.2%" icon={Target} color="var(--success)" />
+        <div style={{ paddingTop: '100px', paddingBottom: '80px', maxWidth: '1280px', margin: '0 auto' }}>
+            
+            {/* Header */}
+            <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', marginBottom: '2rem' }}>
+                <div>
+                    <h1 style={{ fontSize: '2.2rem', fontWeight: 800, fontFamily: 'Outfit', marginBottom: '0.3rem' }}>
+                        Merchant Risk Center
+                    </h1>
+                    <p style={{ color: 'var(--text-secondary)', fontSize: '0.95rem' }}>
+                        Real-time operational monitoring of fraud prevention, chargeback containment, and latency SLA.
+                    </p>
+                </div>
+                <button
+                    onClick={fetchStats}
+                    style={{
+                        display: 'flex',
+                        alignItems: 'center',
+                        gap: '0.5rem',
+                        padding: '0.6rem 1rem',
+                        borderRadius: '8px',
+                        background: 'var(--bg-card)',
+                        border: '1px solid var(--border)',
+                        color: 'var(--text-primary)',
+                        fontSize: '0.85rem',
+                        cursor: 'pointer',
+                    }}
+                >
+                    <RefreshCw size={14} className={loading ? "spinner" : ""} />
+                    <span>Refresh Data</span>
+                </button>
             </div>
 
-            <div style={{ display: 'grid', gridTemplateColumns: '2fr 1fr', gap: '1rem' }}>
+            {/* Stat Cards */}
+            <div style={{ display: 'grid', gridTemplateColumns: 'repeat(4, 1fr)', gap: '1.25rem', marginBottom: '2rem' }}>
+                <StatCard
+                    title="Total Assessments"
+                    value={stats?.total_assessments || 0}
+                    icon={Zap}
+                    color="var(--accent)"
+                    subtext="Real-time"
+                />
+                <StatCard
+                    title="Frauds Contained"
+                    value={stats?.frauds_detected || 0}
+                    icon={ShieldAlert}
+                    color="var(--danger)"
+                    subtext="Deterministic"
+                />
+                <StatCard
+                    title="Merchant Capital Protected"
+                    value={`₹${(stats?.total_amount_protected || 0).toLocaleString('en-IN')}`}
+                    icon={IndianRupee}
+                    color="var(--success)"
+                    subtext="Direct Margin Save"
+                />
+                <StatCard
+                    title="Avg Inference Latency"
+                    value={`${stats?.avg_latency_ms || 11.2} ms`}
+                    icon={Clock}
+                    color="var(--warning)"
+                    subtext="SLA < 50ms"
+                />
+            </div>
+
+            {/* Charts Grid */}
+            <div style={{ display: 'grid', gridTemplateColumns: '2fr 1fr', gap: '1.5rem', marginBottom: '2rem' }}>
+                
                 {/* Trend Chart */}
-                <div className="elevated-card" style={{ padding: '1.5rem' }}>
-                    <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', marginBottom: '1.5rem' }}>
-                        <h3 style={{ fontSize: '1rem' }}>Detection Trend</h3>
-                        <div style={{ display: 'flex', gap: '1rem', fontSize: '0.75rem' }}>
-                            <div style={{ display: 'flex', alignItems: 'center', gap: '0.4rem' }}>
-                                <div style={{ width: '10px', height: '10px', borderRadius: '2px', background: 'var(--accent)' }} />
-                                <span style={{ color: 'var(--text-muted)' }}>Total Scans</span>
-                            </div>
-                            <div style={{ display: 'flex', alignItems: 'center', gap: '0.4rem' }}>
-                                <div style={{ width: '10px', height: '10px', borderRadius: '2px', background: 'var(--danger)' }} />
-                                <span style={{ color: 'var(--text-muted)' }}>Threats</span>
-                            </div>
+                <div style={{
+                    background: 'var(--bg-card)',
+                    padding: '1.75rem',
+                    borderRadius: '16px',
+                    border: '1px solid var(--border-subtle)',
+                }}>
+                    <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', marginBottom: '1.25rem' }}>
+                        <div>
+                            <h3 style={{ fontSize: '1.1rem', fontWeight: 700, fontFamily: 'Outfit' }}>
+                                Protected Value & Transaction Velocity
+                            </h3>
+                            <span style={{ fontSize: '0.75rem', color: 'var(--text-muted)' }}>
+                                Blocked fraud amount (INR ₹) vs total transaction volume
+                            </span>
                         </div>
+                        <span style={{
+                            fontSize: '0.75rem',
+                            padding: '3px 8px',
+                            borderRadius: '4px',
+                            background: 'rgba(0, 229, 255, 0.1)',
+                            color: 'var(--accent)',
+                            fontWeight: 600,
+                        }}>
+                            7-Day Window
+                        </span>
                     </div>
-                    <div style={{ width: '100%', height: '320px' }}>
-                        <ResponsiveContainer>
-                            <AreaChart data={chartData}>
+
+                    <div style={{ width: '100%', height: '280px' }}>
+                        <ResponsiveContainer width="100%" height="100%">
+                            <AreaChart data={trendData}>
                                 <defs>
-                                    <linearGradient id="colorTotal" x1="0" y1="0" x2="0" y2="1">
-                                        <stop offset="5%" stopColor="#00E5FF" stopOpacity={0.2} />
-                                        <stop offset="95%" stopColor="#00E5FF" stopOpacity={0} />
-                                    </linearGradient>
-                                    <linearGradient id="colorThreats" x1="0" y1="0" x2="0" y2="1">
-                                        <stop offset="5%" stopColor="#EF4444" stopOpacity={0.2} />
-                                        <stop offset="95%" stopColor="#EF4444" stopOpacity={0} />
+                                    <linearGradient id="colorAmount" x1="0" y1="0" x2="0" y2="1">
+                                        <stop offset="5%" stopColor="var(--accent)" stopOpacity={0.4}/>
+                                        <stop offset="95%" stopColor="var(--accent)" stopOpacity={0}/>
                                     </linearGradient>
                                 </defs>
-                                <CartesianGrid strokeDasharray="3 3" stroke="rgba(51, 65, 85, 0.3)" vertical={false} />
-                                <XAxis
-                                    dataKey="date" stroke="#64748B" fontSize={11} tickLine={false} axisLine={false}
-                                    tickFormatter={(val) => val.split('-').slice(1).join('/')}
+                                <CartesianGrid strokeDasharray="3 3" stroke="rgba(255, 255, 255, 0.05)" />
+                                <XAxis dataKey="date" stroke="var(--text-muted)" fontSize={12} />
+                                <YAxis stroke="var(--text-muted)" fontSize={12} />
+                                <Tooltip
+                                    contentStyle={{
+                                        background: 'var(--bg-deep)',
+                                        border: '1px solid var(--border)',
+                                        borderRadius: '8px',
+                                    }}
                                 />
-                                <YAxis stroke="#64748B" fontSize={11} tickLine={false} axisLine={false} />
-                                <Tooltip contentStyle={{
-                                    background: '#0F172A', border: '1px solid rgba(51, 65, 85, 0.5)',
-                                    borderRadius: '0.5rem', fontSize: '0.8rem',
-                                }} />
-                                <Area type="monotone" dataKey="total" stroke="#00E5FF" strokeWidth={2} fillOpacity={1} fill="url(#colorTotal)" />
-                                <Area type="monotone" dataKey="threats" stroke="#EF4444" strokeWidth={2} fillOpacity={1} fill="url(#colorThreats)" />
+                                <Area type="monotone" dataKey="amount_blocked" stroke="var(--accent)" fillOpacity={1} fill="url(#colorAmount)" name="INR Blocked" />
                             </AreaChart>
                         </ResponsiveContainer>
                     </div>
                 </div>
 
-                {/* Severity Distribution */}
-                <div className="elevated-card" style={{ padding: '1.5rem' }}>
-                    <h3 style={{ fontSize: '1rem', marginBottom: '1.5rem' }}>Severity Analysis</h3>
-                    <div style={{ width: '100%', height: '220px' }}>
-                        <ResponsiveContainer>
+                {/* Risk Distribution Pie */}
+                <div style={{
+                    background: 'var(--bg-card)',
+                    padding: '1.75rem',
+                    borderRadius: '16px',
+                    border: '1px solid var(--border-subtle)',
+                    display: 'flex',
+                    flexDirection: 'column',
+                }}>
+                    <h3 style={{ fontSize: '1.1rem', fontWeight: 700, fontFamily: 'Outfit', marginBottom: '0.3rem' }}>
+                        Risk Tier Breakdown
+                    </h3>
+                    <span style={{ fontSize: '0.75rem', color: 'var(--text-muted)', marginBottom: '1rem' }}>
+                        Distribution of transaction decisions
+                    </span>
+
+                    <div style={{ width: '100%', height: '200px', flex: 1 }}>
+                        <ResponsiveContainer width="100%" height="100%">
                             <PieChart>
                                 <Pie
-                                    data={displaySeverityData} cx="50%" cy="50%"
-                                    innerRadius={55} outerRadius={75} paddingAngle={4} dataKey="value"
+                                    data={pieData.length ? pieData : [{ name: 'ALLOW', value: 85, color: 'var(--success)' }, { name: 'BLOCK', value: 15, color: 'var(--danger)' }]}
+                                    innerRadius={55}
+                                    outerRadius={80}
+                                    paddingAngle={5}
+                                    dataKey="value"
                                 >
-                                    {displaySeverityData.map((entry, index) => (
+                                    {(pieData.length ? pieData : [{ color: 'var(--success)' }, { color: 'var(--danger)' }]).map((entry, index) => (
                                         <Cell key={`cell-${index}`} fill={entry.color} />
                                     ))}
                                 </Pie>
-                                <Tooltip contentStyle={{
-                                    background: '#0F172A', border: '1px solid rgba(51, 65, 85, 0.5)',
-                                    borderRadius: '0.5rem', fontSize: '0.8rem',
-                                }} />
+                                <Tooltip />
                             </PieChart>
                         </ResponsiveContainer>
                     </div>
-                    <div style={{ display: 'flex', flexDirection: 'column', gap: '0.6rem', marginTop: '0.75rem' }}>
-                        {displaySeverityData.map((item, idx) => (
-                            <div key={idx} style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center' }}>
-                                <div style={{ display: 'flex', alignItems: 'center', gap: '0.6rem' }}>
-                                    <div style={{ width: '8px', height: '8px', borderRadius: '50%', background: item.color }} />
-                                    <span style={{ fontSize: '0.8rem', color: 'var(--text-secondary)' }}>{item.name}</span>
+
+                    <div style={{ display: 'flex', justifyContent: 'space-around', paddingTop: '1rem', borderTop: '1px solid var(--border-subtle)' }}>
+                        {['CRITICAL', 'HIGH', 'MEDIUM', 'LOW'].map((lvl) => (
+                            <div key={lvl} style={{ textAlign: 'center' }}>
+                                <div style={{ fontSize: '0.7rem', color: riskColors[lvl], fontWeight: 700 }}>{lvl}</div>
+                                <div style={{ fontSize: '0.95rem', fontWeight: 700, color: 'var(--text-primary)' }}>
+                                    {stats?.risk_distribution?.[lvl] || 0}
                                 </div>
-                                <span style={{ fontWeight: 600, fontSize: '0.85rem', fontFamily: 'JetBrains Mono, monospace' }}>{item.value}%</span>
                             </div>
                         ))}
                     </div>
                 </div>
+
             </div>
+
         </div>
     );
 };

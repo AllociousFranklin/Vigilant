@@ -1,33 +1,12 @@
-import React, { useState, useEffect, useRef } from 'react';
-import { Shield, LayoutDashboard, Search, Clock, Layers, FileText, ChevronDown } from 'lucide-react';
+import React from 'react';
+import { ShieldCheck, Activity, LineChart, History, Award, CheckCircle2 } from 'lucide-react';
 
 const Navbar = ({ activePage, setActivePage }) => {
-    const [showDropdown, setShowDropdown] = useState(false);
-    const dropdownRef = useRef(null);
-
-    useEffect(() => {
-        const handleClickOutside = (event) => {
-            if (dropdownRef.current && !dropdownRef.current.contains(event.target)) {
-                setShowDropdown(false);
-            }
-        };
-        document.addEventListener('mousedown', handleClickOutside);
-        return () => document.removeEventListener('mousedown', handleClickOutside);
-    }, []);
-
-    const handleBadgeClick = () => {
-        if (activePage === 'dashboard') {
-            setShowDropdown(!showDropdown);
-        } else {
-            setActivePage('dashboard');
-        }
-    };
-
     const navItems = [
-        { id: 'dashboard', label: 'Dashboard' },
-        { id: 'scanner', label: 'Scanner' },
-        { id: 'history', label: 'Threat Log' },
-        { id: 'about', label: 'Architecture' },
+        { id: 'scorer', label: 'Transaction Risk', icon: ShieldCheck },
+        { id: 'dashboard', label: 'Merchant Monitor', icon: Activity },
+        { id: 'history', label: 'Audit Trail', icon: History },
+        { id: 'metrics', label: 'Honest Metrics', icon: Award, badge: 'Track 02' },
     ];
 
     return (
@@ -36,8 +15,8 @@ const Navbar = ({ activePage, setActivePage }) => {
             top: 0,
             left: 0,
             right: 0,
-            height: '80px',
-            background: 'rgba(10, 15, 28, 0.92)',
+            height: '76px',
+            background: 'rgba(10, 15, 28, 0.94)',
             backdropFilter: 'blur(20px)',
             WebkitBackdropFilter: 'blur(20px)',
             borderBottom: '1px solid var(--border-subtle)',
@@ -45,151 +24,121 @@ const Navbar = ({ activePage, setActivePage }) => {
             display: 'flex',
             alignItems: 'center',
             justifyContent: 'space-between',
-            padding: '0 3rem',
+            padding: '0 2.5rem',
             zIndex: 1000,
         }}>
             {/* Left: Brand */}
-            <div style={{
-                display: 'flex',
-                alignItems: 'center',
-                gap: '0.75rem',
-            }}>
-                <Shield size={26} color="var(--accent)" strokeWidth={2.5} />
+            <div 
+                onClick={() => setActivePage('scorer')}
+                style={{
+                    display: 'flex',
+                    alignItems: 'center',
+                    gap: '0.85rem',
+                    cursor: 'pointer',
+                }}
+            >
+                <div style={{
+                    width: '42px',
+                    height: '42px',
+                    borderRadius: '10px',
+                    background: 'linear-gradient(135deg, #00E5FF 0%, #2563EB 100%)',
+                    display: 'flex',
+                    alignItems: 'center',
+                    justifyContent: 'center',
+                    boxShadow: '0 0 20px rgba(0, 229, 255, 0.3)',
+                }}>
+                    <ShieldCheck size={26} color="#0A0F1C" strokeWidth={2.5} />
+                </div>
                 <div style={{ display: 'flex', flexDirection: 'column', lineHeight: 1.2 }}>
                     <span style={{
                         fontFamily: 'Outfit',
-                        fontWeight: 700,
-                        fontSize: '1.15rem',
-                        letterSpacing: '0.15em',
-                        color: 'var(--text-primary)'
-                    }}>VIGILANT</span>
+                        fontWeight: 800,
+                        fontSize: '1.25rem',
+                        letterSpacing: '0.12em',
+                        background: 'linear-gradient(90deg, #FFFFFF 0%, #00E5FF 100%)',
+                        WebkitBackgroundClip: 'text',
+                        WebkitTextFillColor: 'transparent',
+                    }}>SENTINEL</span>
                     <span style={{
                         fontSize: '0.65rem',
                         color: 'var(--text-muted)',
                         letterSpacing: '0.08em',
                         textTransform: 'uppercase',
-                    }}>Policy-Enforced AI Defense</span>
+                        fontWeight: 600,
+                    }}>Razorpay AI Risk Manager</span>
                 </div>
             </div>
 
             {/* Center: Navigation */}
             <div style={{
                 display: 'flex',
-                gap: '0.25rem',
+                gap: '0.35rem',
                 alignItems: 'center',
+                background: 'rgba(15, 23, 42, 0.6)',
+                padding: '4px',
+                borderRadius: '12px',
+                border: '1px solid var(--border-subtle)',
             }}>
                 {navItems.map((item) => {
                     const isActive = activePage === item.id;
+                    const Icon = item.icon;
                     return (
                         <button
-                            className="nav-btn"
                             key={item.id}
                             onClick={() => setActivePage(item.id)}
                             style={{
-                                position: 'relative',
                                 display: 'flex',
                                 alignItems: 'center',
                                 gap: '0.5rem',
-                                padding: '0.6rem 1.25rem',
-                                borderRadius: '0.5rem',
-                                background: isActive ? 'rgba(0, 229, 255, 0.04)' : 'transparent',
+                                padding: '0.55rem 1.1rem',
+                                borderRadius: '8px',
+                                background: isActive ? 'linear-gradient(135deg, rgba(0, 229, 255, 0.15) 0%, rgba(37, 99, 235, 0.15) 100%)' : 'transparent',
                                 color: isActive ? 'var(--accent)' : 'var(--text-secondary)',
-                                border: 'none',
-                                fontSize: '0.875rem',
+                                border: isActive ? '1px solid rgba(0, 229, 255, 0.3)' : '1px solid transparent',
+                                fontSize: '0.85rem',
                                 fontWeight: isActive ? 600 : 500,
-                                letterSpacing: '0.01em',
-                                transition: 'color 0.15s ease-out, background 0.15s ease-out',
-                                transform: 'none',
+                                cursor: 'pointer',
+                                transition: 'all 0.2s ease',
                             }}
                         >
+                            <Icon size={16} />
                             <span>{item.label}</span>
-                            {/* Subtle cyan underline indicator */}
-                            {isActive && (
-                                <div style={{
-                                    position: 'absolute',
-                                    bottom: '-2px',
-                                    left: '50%',
-                                    transform: 'translateX(-50%)',
-                                    width: '60%',
-                                    height: '2px',
-                                    background: 'var(--accent)',
-                                    borderRadius: '1px',
-                                    boxShadow: '0 0 8px var(--accent-glow)',
-                                }} />
+                            {item.badge && (
+                                <span style={{
+                                    fontSize: '0.65rem',
+                                    padding: '2px 6px',
+                                    borderRadius: '4px',
+                                    background: isActive ? 'var(--accent)' : 'rgba(0, 229, 255, 0.1)',
+                                    color: isActive ? '#0A0F1C' : 'var(--accent)',
+                                    fontWeight: 700,
+                                }}>{item.badge}</span>
                             )}
                         </button>
                     );
                 })}
             </div>
 
+            {/* Right: Security & Compliance Tag */}
             <div style={{
                 display: 'flex',
                 alignItems: 'center',
-                gap: '0.75rem',
-                position: 'relative'
-            }} ref={dropdownRef}>
-                <button
-                    onClick={handleBadgeClick}
-                    style={{
-                        display: 'flex',
-                        alignItems: 'center',
-                        gap: '0.5rem',
-                        padding: '0.4rem 1rem',
-                        background: 'var(--accent-dim)',
-                        border: '1px solid rgba(0, 229, 255, 0.12)',
-                        borderRadius: '100px',
-                        fontSize: '0.7rem',
-                        fontWeight: 600,
-                        letterSpacing: '0.08em',
-                        color: 'var(--accent)',
-                        textTransform: 'uppercase',
-                        cursor: 'pointer',
-                        transition: 'all 0.15s ease-out',
-                    }}
-                    onMouseEnter={(e) => e.currentTarget.style.background = 'rgba(0, 229, 255, 0.12)'}
-                    onMouseLeave={(e) => e.currentTarget.style.background = 'var(--accent-dim)'}
-                >
-                    <span className="status-dot operational"></span>
-                    <span>Enterprise Console</span>
-                    {activePage === 'dashboard' && (
-                        <ChevronDown size={14} style={{
-                            transform: showDropdown ? 'rotate(180deg)' : 'none',
-                            transition: 'transform 0.2s ease'
-                        }} />
-                    )}
-                </button>
-
-                {/* System Status Dropdown */}
-                {showDropdown && (
-                    <div style={{
-                        position: 'absolute',
-                        top: '120%',
-                        right: 0,
-                        width: '240px',
-                        background: 'var(--bg-card)',
-                        border: '1px solid var(--border)',
-                        borderRadius: '0.75rem',
-                        padding: '1rem',
-                        boxShadow: '0 12px 32px rgba(0,0,0,0.5)',
-                        zIndex: 1001,
-                        display: 'flex',
-                        flexDirection: 'column',
-                        gap: '0.75rem',
-                    }}>
-                        <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center' }}>
-                            <span style={{ fontSize: '0.7rem', color: 'var(--text-muted)', fontWeight: 600, textTransform: 'uppercase' }}>System Environment</span>
-                            <span style={{ fontSize: '0.75rem', color: 'var(--text-primary)', fontWeight: 600 }}>Production</span>
-                        </div>
-                        <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center' }}>
-                            <span style={{ fontSize: '0.7rem', color: 'var(--text-muted)', fontWeight: 600, textTransform: 'uppercase' }}>Policy Version</span>
-                            <span style={{ fontSize: '0.75rem', color: 'var(--text-primary)', fontWeight: 600 }}>v4.0</span>
-                        </div>
-                        <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center' }}>
-                            <span style={{ fontSize: '0.7rem', color: 'var(--text-muted)', fontWeight: 600, textTransform: 'uppercase' }}>SOC Mode</span>
-                            <span style={{ fontSize: '0.75rem', color: 'var(--success)', fontWeight: 700 }}>Active</span>
-                        </div>
-                    </div>
-                )}
+                gap: '1rem',
+            }}>
+                <div style={{
+                    display: 'flex',
+                    alignItems: 'center',
+                    gap: '0.5rem',
+                    padding: '0.4rem 0.85rem',
+                    borderRadius: '20px',
+                    background: 'rgba(22, 199, 132, 0.08)',
+                    border: '1px solid rgba(22, 199, 132, 0.25)',
+                    fontSize: '0.75rem',
+                    color: 'var(--success)',
+                    fontWeight: 600,
+                }}>
+                    <CheckCircle2 size={14} />
+                    <span>DEFENSE-ONLY (STRICT)</span>
+                </div>
             </div>
         </nav>
     );

@@ -9,37 +9,41 @@ const apiClient = axios.create({
   },
 });
 
-export const vigilantApi = {
-  scan: async (payload) => {
-    const response = await apiClient.post('/scan', payload);
+export const sentinelApi = {
+  assessTransaction: async (payload) => {
+    const response = await apiClient.post('/assess', payload);
     return response.data;
   },
-  
-  getHistory: async (page = 1, pageSize = 20, severity = null, channel = null) => {
+
+  getTransactions: async (page = 1, pageSize = 20, riskLevel = null, merchantId = null) => {
     const params = { page, page_size: pageSize };
-    if (severity) params.severity = severity;
-    if (channel) params.channel = channel;
-    
-    const response = await apiClient.get('/history', { params });
+    if (riskLevel) params.risk_level = riskLevel;
+    if (merchantId) params.merchant_id = merchantId;
+    const response = await apiClient.get('/transactions', { params });
     return response.data;
   },
-  
+
   getStats: async () => {
     const response = await apiClient.get('/stats');
     return response.data;
   },
-  
-  submitFeedback: async (scanId, verdict, notes = null) => {
+
+  submitFeedback: async (transactionId, outcome, notes = null) => {
     const response = await apiClient.post('/feedback', {
-      scan_id: scanId,
-      verdict,
+      transaction_id: transactionId,
+      outcome,
       notes,
     });
     return response.data;
   },
-  
-  checkHealth: async () => {
-    const response = await apiClient.get('/health');
+
+  getDisputeDossier: async (assessmentId) => {
+    const response = await apiClient.get(`/dispute/${assessmentId}`);
     return response.data;
-  }
+  },
+
+  getMetrics: async () => {
+    const response = await apiClient.get('/metrics');
+    return response.data;
+  },
 };

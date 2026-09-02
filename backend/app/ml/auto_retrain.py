@@ -1,8 +1,6 @@
-"""VIGILANT - Adaptive Retraining Trigger
+"""SENTINEL - Adaptive Retraining Trigger
 
-Layer 5 & 6: Trigger-based Retraining & Incremental Dataset Builder.
-Runs periodically. If enough curated APPROVED samples exist, it triggers
-the sliding window build via data_shim, retrains, and saves shadow models.
+Monitors outcomes database and periodically retrains fraud and chargeback models.
 """
 import os
 import sys
@@ -13,10 +11,10 @@ from datetime import datetime
 
 logger = logging.getLogger(__name__)
 
-DB_PATH = os.path.join(os.path.dirname(__file__), '..', '..', 'data', 'threat_intel.db')
+DB_PATH = os.path.join(os.path.dirname(__file__), '..', '..', 'sentinel.db')
 ML_DIR = os.path.dirname(__file__)
 
-RETRAIN_THRESHOLD = 50 # In prod this would be 10000
+RETRAIN_THRESHOLD = 50
 
 def check_trigger() -> bool:
     if not os.path.exists(DB_PATH):
@@ -25,33 +23,30 @@ def check_trigger() -> bool:
     conn = sqlite3.connect(DB_PATH)
     c = conn.cursor()
     try:
-        c.execute("SELECT COUNT(*) FROM curated_training_pool WHERE status = 'APPROVED'")
+        c.execute("SELECT COUNT(*) FROM outcomes")
         count = c.fetchone()[0]
     except sqlite3.OperationalError:
         count = 0
     finally:
         conn.close()
     
-    logger.info(f"Retrain check: {count} APPROVED samples found (Threshold: {RETRAIN_THRESHOLD}).")
+    logger.info(f"Retrain check: {count} outcomes found (Threshold: {RETRAIN_THRESHOLD}).")
     return count >= RETRAIN_THRESHOLD
 
 def execute_retrain_pipeline():
-    logger.info("TRIGGER MET: Promoting dataset and running Sliding-Window training...")
+    logger.info("TRIGGER MET: Retraining SENTINEL ML models...")
     
     env = os.environ.copy()
     env["PYTHONPATH"] = os.path.join(ML_DIR, '..', '..')
     
-    # 1. Build Canonical Artifact (Now includes Curated DB)
     logger.info("=> Running data_shim.py")
     subprocess.run(["python", os.path.join(ML_DIR, "data_shim.py")], check=True, env=env)
     
-    # 2. Train URL Model
-    logger.info("=> Running train_url_model.py")
-    subprocess.run(["python", os.path.join(ML_DIR, "train_url_model.py")], check=True, env=env)
+    logger.info("=> Running train_fraud_model.py")
+    subprocess.run(["python", os.path.join(ML_DIR, "train_fraud_model.py")], check=True, env=env)
     
-    # 3. Train NLP Model
-    logger.info("=> Running train_nlp_model.py")
-    subprocess.run(["python", os.path.join(ML_DIR, "train_nlp_model.py")], check=True, env=env)
+    logger.info("=> Running train_chargeback_model.py")
+    subprocess.run(["python", os.path.join(ML_DIR, "train_chargeback_model.py")], check=True, env=env)
     
     logger.info("Retraining successful! New models saved.")
 

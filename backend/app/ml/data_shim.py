@@ -1,204 +1,562 @@
 """
-data_shim.py - Canonical Data Adapter for VIGILANT v3.0 ML Pipeline
+SENTINEL Data Shim - Canonical Training Data Builder
 
-Maps, validates, and passes through real-world Kaggle datasets and merges
-them with synthetic edge cases. Emits a single canonical artifact: training_v3.parquet.
-It does NOT invent features, derive compound logic, or clean dataset bias.
+Generates realistic synthetic Indian BFSI payment transactions with specific fraud
+and legitimate behavioral patterns. Outputs training_v3.parquet.
+Includes:
+- 30 normalized features matching app.engine.features.ALL_FEATURE_NAMES exactly
+- Dual target labels: 'label' (fraud) and 'chargeback_label' (dispute propensity)
+- Dedicated kill-switch guardrail corpus of legitimate high-value transactions.
 """
 import os
 import sys
-import pandas as pd
+import math
 import numpy as np
+import pandas as pd
 
 sys.path.insert(0, os.path.join(os.path.dirname(__file__), '..', '..'))
-from app.engine.detector import ALL_FEATURE_NAMES
+from app.engine.features import ALL_FEATURE_NAMES, extract_all_features
 
-def get_empty_feature_dict():
-    return {f: 0 for f in ALL_FEATURE_NAMES}
 
-def load_kaggle_url_data() -> pd.DataFrame:
-    """Loads and maps the shashwatwork dataset."""
-    csv_path = "dataset_B.csv"
-    data = []
-    
-    if os.path.exists(csv_path):
-        raw_df = pd.read_csv(csv_path)
-        for _, row in raw_df.iterrows():
-            features = get_empty_feature_dict()
-            # Map -> validate -> pass through
-            features['url_length'] = row.get('url_length', 0)
-            features['url_dot_count'] = row.get('nb_dots', 0)
-            features['url_has_ip'] = row.get('ip', 0)
-            features['struct_redirection_chain_len'] = row.get('nb_external_redirection', 0)
-            
-            features['label'] = 1 if row.get('status') == 'phishing' else 0
-            features['source'] = 'kaggle_url'
-            data.append(features)
-    else:
-        # Mocking representation
-        print("  -> Kaggle URL CSV not found locally, simulating pass-through struct.")
-        for i in range(1000):
-            f = get_empty_feature_dict()
-            f['url_length'] = np.random.randint(40, 100)
-            f['label'] = np.random.choice([0, 1])
-            f['source'] = 'kaggle_url'
-            data.append(f)
-            
-    return pd.DataFrame(data)
+def generate_canonical_dataset() -> pd.DataFrame:
+    np.random.seed(42)
+    rows = []
 
-def load_kaggle_nlp_data() -> pd.DataFrame:
-    """Loads and maps the ahmadtijjani dataset. (Part of Fixed Anchor Set)"""
-    data = []
-    csv_path = "phishing_urgency_auth.csv"
-    
-    if os.path.exists(csv_path):
-        raw_df = pd.read_csv(csv_path)
-        for _, row in raw_df.iterrows():
-            features = get_empty_feature_dict()
-            category = str(row.get('category', '')).lower()
-            # Strict pass-through of explicit bias
-            if 'authority' in category:
-                features['nlp_authority_score'] = 1.0
-            elif 'urgency' in category:
-                features['nlp_urgency_score'] = 1.0
-                
-            features['label'] = 1 if row.get('label') == 1 else 0
-            features['source'] = 'kaggle_nlp'
-            data.append(features)
-    else:
-        print("  -> Kaggle NLP CSV not found locally, simulating pass-through struct.")
-        for i in range(100):
-            f = get_empty_feature_dict()
-            if np.random.random() > 0.5:
-                f['nlp_authority_score'] = 1.0
-            f['label'] = np.random.choice([0, 1])
-            f['source'] = 'kaggle_nlp'
-            data.append(f)
+    # Helper for round amount logic consistent with features.py
+    def check_round_amount(amt: float) -> float:
+        return 1.0 if (amt % 500 == 0 and amt >= 500) else 0.0
 
-    return pd.DataFrame(data)
+    # ─────────────────────────────────────────────────────────────
+    # 1. FRAUD PATTERNS (Total = 5000)
+    # ─────────────────────────────────────────────────────────────
 
-def load_curated_data() -> pd.DataFrame:
-    """
-    Sliding Window Layer: Loads APPROVED samples from the curation pool.
-    """
-    import sqlite3
-    db_path = os.path.join(os.path.dirname(__file__), '..', '..', 'data', 'threat_intel.db')
-    data = []
-    
-    if os.path.exists(db_path):
-        try:
-            conn = sqlite3.connect(db_path)
-            c = conn.cursor()
-            c.execute("SELECT features_json, label, source FROM curated_training_pool WHERE status = 'APPROVED'")
-            
-            for features_json, label, source in c.fetchall():
-                import json
-                parsed_features = json.loads(features_json)
-                
-                features = get_empty_feature_dict()
-                # Safely map JSON into our exact schema
-                for k, v in parsed_features.items():
-                    if k in features:
-                        features[k] = v
-                        
-                features['label'] = label
-                features['source'] = f"curated_{source}"
-                data.append(features)
-                
-            conn.close()
-        except sqlite3.OperationalError:
-            print("  -> curation database not initialized, skipping adaptive layer.")
-            
-    if not data:
-        print("  -> No curated samples found in DB.")
-        
-    return pd.DataFrame(data)
+    # 1.1 Card Testing (n=800): Rapid small amounts, card testing botnet
+    # Low chargeback rate because caught before settlement or below dispute threshold
+    for _ in range(800):
+        amount = float(np.random.uniform(10, 99))
+        merch_avg = 5000.0
+        merch_std = 3000.0
+        row = {
+            'amount_log': math.log(amount + 1),
+            'amount_zscore': (amount - merch_avg) / merch_std,
+            'is_round_amount': check_round_amount(amount),
+            'amount_to_avg_ratio': amount / merch_avg,
+            'is_high_value': 0.0,
+            'hour_of_day': np.random.uniform(0.0, 1.0),
+            'is_weekend': float(np.random.choice([0, 1], p=[0.7, 0.3])),
+            'is_late_night': float(np.random.choice([0, 1], p=[0.5, 0.5])),
+            'days_since_last_txn': np.random.uniform(0.0, 0.05),
+            'txn_count_1h': np.random.uniform(0.5, 1.0),       # 5 to 10+ txns in 1 hour
+            'txn_count_24h': np.random.uniform(0.3, 0.9),
+            'distinct_merchants_1h': np.random.uniform(0.4, 1.0),
+            'amount_sum_24h_log': math.log(np.random.uniform(500, 5000) + 1),
+            'payment_method_risk': 0.35,                       # Credit card
+            'is_international': float(np.random.choice([0, 1], p=[0.7, 0.3])),
+            'is_first_time_card': 1.0,
+            'card_bin_risk': np.random.uniform(0.25, 0.35),
+            'customer_account_age_log': math.log(np.random.randint(1, 10) + 1),
+            'customer_total_txns_log': math.log(np.random.randint(1, 5) + 1),
+            'customer_dispute_rate': np.random.uniform(0.0, 0.1),
+            'email_domain_risk': np.random.choice([0.30, 0.90], p=[0.4, 0.6]),
+            'phone_verified': float(np.random.choice([0, 1], p=[0.8, 0.2])),
+            'merchant_fraud_rate_30d': np.random.uniform(0.02, 0.08),
+            'merchant_category_risk': 0.45,
+            'merchant_avg_txn_log': math.log(merch_avg + 1),
+            'merchant_vintage_log': math.log(365 + 1),
+            'device_fingerprint_new': float(np.random.choice([0, 1], p=[0.3, 0.7])),
+            'ip_risk_score': np.random.uniform(0.6, 0.95),
+            'geo_distance_score': np.random.uniform(0.3, 0.9),
+            'billing_shipping_mismatch': float(np.random.choice([0, 1], p=[0.5, 0.5])),
+            'label': 1,
+            'chargeback_label': 0,
+            'source': 'fraud_card_testing'
+        }
+        rows.append(row)
 
-def load_benign_authority_data() -> pd.DataFrame:
-    """Loads negative authority corpus."""
-    import json
-    path = os.path.join(os.path.dirname(__file__), '..', '..', 'benign_validation.json')
-    data = []
-    if os.path.exists(path):
-        with open(path, 'r') as f:
-            benign = json.load(f)
-            for case in benign.get("test_cases", []):
-                features = get_empty_feature_dict()
-                features['nlp_authority_score'] = 1.0 # Force pure authority score
-                features['label'] = 0
-                features['source'] = 'benign_authority'
-                data.append(features)
-    else:
-        for i in range(100):
-            f = get_empty_feature_dict()
-            f['nlp_authority_score'] = 1.0
-            f['label'] = 0
-            f['source'] = 'benign_authority'
-            data.append(f)
-            
-    return pd.DataFrame(data)
+    # 1.2 Velocity Spike (n=800): Sudden burst of high volume purchases
+    for _ in range(800):
+        if np.random.rand() < 0.25:
+            amount = float(np.random.choice([5000, 10000, 15000, 20000, 25000, 50000]))
+        else:
+            amount = float(np.random.uniform(1000, 50000))
+        merch_avg = 8000.0
+        merch_std = 4000.0
+        row = {
+            'amount_log': math.log(amount + 1),
+            'amount_zscore': (amount - merch_avg) / merch_std,
+            'is_round_amount': check_round_amount(amount),
+            'amount_to_avg_ratio': amount / merch_avg,
+            'is_high_value': 1.0 if amount > 50000 else 0.0,
+            'hour_of_day': np.random.uniform(0.0, 1.0),
+            'is_weekend': float(np.random.choice([0, 1], p=[0.6, 0.4])),
+            'is_late_night': float(np.random.choice([0, 1], p=[0.4, 0.6])),
+            'days_since_last_txn': np.random.uniform(0.0, 0.02),
+            'txn_count_1h': np.random.uniform(0.6, 1.0),       # High velocity
+            'txn_count_24h': np.random.uniform(0.5, 1.0),
+            'distinct_merchants_1h': np.random.uniform(0.2, 0.8),
+            'amount_sum_24h_log': math.log(np.random.uniform(30000, 200000) + 1),
+            'payment_method_risk': np.random.choice([0.35, 0.20, 0.15], p=[0.6, 0.2, 0.2]),
+            'is_international': float(np.random.choice([0, 1], p=[0.7, 0.3])),
+            'is_first_time_card': float(np.random.choice([0, 1], p=[0.4, 0.6])),
+            'card_bin_risk': np.random.uniform(0.20, 0.35),
+            'customer_account_age_log': math.log(np.random.randint(5, 60) + 1),
+            'customer_total_txns_log': math.log(np.random.randint(5, 30) + 1),
+            'customer_dispute_rate': np.random.uniform(0.05, 0.30),
+            'email_domain_risk': np.random.choice([0.30, 0.90], p=[0.6, 0.4]),
+            'phone_verified': float(np.random.choice([0, 1], p=[0.6, 0.4])),
+            'merchant_fraud_rate_30d': np.random.uniform(0.02, 0.06),
+            'merchant_category_risk': np.random.choice([0.45, 0.40, 0.35]),
+            'merchant_avg_txn_log': math.log(merch_avg + 1),
+            'merchant_vintage_log': math.log(500 + 1),
+            'device_fingerprint_new': float(np.random.choice([0, 1], p=[0.4, 0.6])),
+            'ip_risk_score': np.random.uniform(0.4, 0.85),
+            'geo_distance_score': np.random.uniform(0.3, 0.8),
+            'billing_shipping_mismatch': float(np.random.choice([0, 1], p=[0.6, 0.4])),
+            'label': 1,
+            'chargeback_label': 0,
+            'source': 'fraud_velocity_spike'
+        }
+        rows.append(row)
 
-def generate_synthetic_data() -> pd.DataFrame:
-    """Generate synthetic edge cases ONLY. Keeps old structural coverage."""
-    # We dynamically import so we don't clobber the top-level namespace
-    from app.ml.train_url_model import generate_training_data as url_gen
-    from app.ml.train_nlp_model import generate_nlp_training_data as nlp_gen
-    
-    url_df = url_gen(1000)
-    nlp_df = nlp_gen(1000)
-    
-    combined = pd.concat([url_df, nlp_df], ignore_index=True)
-    
-    # Map any missing columns to 0 for exact schema matching
-    for col in ALL_FEATURE_NAMES:
-        if col not in combined.columns:
-            combined[col] = 0.0
-            
-    combined['source'] = 'synthetic_edge'
-    return combined
+    # 1.3 High Value from New Device (n=800): ATO or stolen credentials
+    for _ in range(800):
+        if np.random.rand() < 0.3:
+            amount = float(np.random.choice([50000, 75000, 100000, 150000, 200000]))
+        else:
+            amount = float(np.random.uniform(35000, 200000))
+        merch_avg = 10000.0
+        merch_std = 6000.0
+        row = {
+            'amount_log': math.log(amount + 1),
+            'amount_zscore': (amount - merch_avg) / merch_std,
+            'is_round_amount': check_round_amount(amount),
+            'amount_to_avg_ratio': amount / merch_avg,
+            'is_high_value': 1.0,
+            'hour_of_day': np.random.uniform(0.05, 0.25),      # Late night hours
+            'is_weekend': float(np.random.choice([0, 1], p=[0.5, 0.5])),
+            'is_late_night': 1.0,
+            'days_since_last_txn': np.random.uniform(0.3, 1.0),
+            'txn_count_1h': np.random.uniform(0.1, 0.4),
+            'txn_count_24h': np.random.uniform(0.1, 0.4),
+            'distinct_merchants_1h': 0.2,
+            'amount_sum_24h_log': math.log(amount + 1000),
+            'payment_method_risk': 0.35,
+            'is_international': float(np.random.choice([0, 1], p=[0.5, 0.5])),
+            'is_first_time_card': 1.0,
+            'card_bin_risk': np.random.uniform(0.25, 0.35),
+            'customer_account_age_log': math.log(np.random.randint(1, 30) + 1),
+            'customer_total_txns_log': math.log(np.random.randint(1, 10) + 1),
+            'customer_dispute_rate': np.random.uniform(0.0, 0.2),
+            'email_domain_risk': np.random.choice([0.30, 0.90], p=[0.5, 0.5]),
+            'phone_verified': 0.0,
+            'merchant_fraud_rate_30d': np.random.uniform(0.02, 0.07),
+            'merchant_category_risk': 0.45,                    # Electronics/luxury
+            'merchant_avg_txn_log': math.log(merch_avg + 1),
+            'merchant_vintage_log': math.log(300 + 1),
+            'device_fingerprint_new': 1.0,                     # Always new device!
+            'ip_risk_score': np.random.uniform(0.7, 0.95),     # Proxy/VPN
+            'geo_distance_score': np.random.uniform(0.5, 1.0),
+            'billing_shipping_mismatch': 1.0,
+            'label': 1,
+            'chargeback_label': 0,
+            'source': 'fraud_high_value_new_device'
+        }
+        rows.append(row)
+
+    # 1.4 Billing/Shipping Mismatch & Cross-Border (n=800)
+    # High dispute rate: goods shipped abroad with contested delivery -> Chargeback
+    for _ in range(800):
+        if np.random.rand() < 0.25:
+            amount = float(np.random.choice([10000, 25000, 50000, 75000, 100000]))
+        else:
+            amount = float(np.random.uniform(5000, 100000))
+        merch_avg = 7000.0
+        merch_std = 4000.0
+        row = {
+            'amount_log': math.log(amount + 1),
+            'amount_zscore': (amount - merch_avg) / merch_std,
+            'is_round_amount': check_round_amount(amount),
+            'amount_to_avg_ratio': amount / merch_avg,
+            'is_high_value': 1.0 if amount > 50000 else 0.0,
+            'hour_of_day': np.random.uniform(0.0, 1.0),
+            'is_weekend': float(np.random.choice([0, 1], p=[0.6, 0.4])),
+            'is_late_night': float(np.random.choice([0, 1], p=[0.6, 0.4])),
+            'days_since_last_txn': np.random.uniform(0.1, 0.8),
+            'txn_count_1h': np.random.uniform(0.1, 0.5),
+            'txn_count_24h': np.random.uniform(0.1, 0.6),
+            'distinct_merchants_1h': 0.2,
+            'amount_sum_24h_log': math.log(amount + 5000),
+            'payment_method_risk': 0.35,
+            'is_international': 1.0,                           # Cross-border
+            'is_first_time_card': 1.0,
+            'card_bin_risk': np.random.uniform(0.28, 0.35),
+            'customer_account_age_log': math.log(np.random.randint(5, 50) + 1),
+            'customer_total_txns_log': math.log(np.random.randint(1, 8) + 1),
+            'customer_dispute_rate': np.random.uniform(0.1, 0.4),
+            'email_domain_risk': np.random.choice([0.30, 0.90], p=[0.6, 0.4]),
+            'phone_verified': 0.0,
+            'merchant_fraud_rate_30d': np.random.uniform(0.02, 0.05),
+            'merchant_category_risk': 0.40,
+            'merchant_avg_txn_log': math.log(merch_avg + 1),
+            'merchant_vintage_log': math.log(400 + 1),
+            'device_fingerprint_new': 1.0,
+            'ip_risk_score': np.random.uniform(0.6, 0.9),
+            'geo_distance_score': np.random.uniform(0.7, 1.0),
+            'billing_shipping_mismatch': 1.0,                  # Definite mismatch
+            'label': 1,
+            'chargeback_label': 1,                             # High dispute target
+            'source': 'fraud_billing_mismatch'
+        }
+        rows.append(row)
+
+    # 1.5 Chargeback Abuser (Friendly Fraud / First Party Fraud) (n=900)
+    # Primary chargeback driver: cardholders who dispute legitimate orders claiming non-receipt
+    for _ in range(900):
+        if np.random.rand() < 0.3:
+            amount = float(np.random.choice([2500, 5000, 10000, 15000, 25000, 50000]))
+        else:
+            amount = float(np.random.uniform(2000, 80000))
+        merch_avg = 6000.0
+        merch_std = 3500.0
+        row = {
+            'amount_log': math.log(amount + 1),
+            'amount_zscore': (amount - merch_avg) / merch_std,
+            'is_round_amount': check_round_amount(amount),
+            'amount_to_avg_ratio': amount / merch_avg,
+            'is_high_value': 1.0 if amount > 50000 else 0.0,
+            'hour_of_day': np.random.uniform(0.3, 0.9),
+            'is_weekend': float(np.random.choice([0, 1], p=[0.5, 0.5])),
+            'is_late_night': 0.0,
+            'days_since_last_txn': np.random.uniform(0.05, 0.3),
+            'txn_count_1h': np.random.uniform(0.1, 0.4),
+            'txn_count_24h': np.random.uniform(0.1, 0.5),
+            'distinct_merchants_1h': 0.2,
+            'amount_sum_24h_log': math.log(amount + 2000),
+            'payment_method_risk': np.random.choice([0.35, 0.20], p=[0.7, 0.3]),
+            'is_international': float(np.random.choice([0, 1], p=[0.8, 0.2])),
+            'is_first_time_card': 0.0,                         # Uses same card!
+            'card_bin_risk': np.random.uniform(0.20, 0.30),
+            'customer_account_age_log': math.log(np.random.randint(30, 300) + 1),
+            'customer_total_txns_log': math.log(np.random.randint(10, 80) + 1),
+            'customer_dispute_rate': np.random.uniform(0.30, 0.85), # Chronic disputer!
+            'email_domain_risk': 0.30,                         # Regular gmail
+            'phone_verified': 1.0,
+            'merchant_fraud_rate_30d': np.random.uniform(0.01, 0.04),
+            'merchant_category_risk': 0.35,
+            'merchant_avg_txn_log': math.log(merch_avg + 1),
+            'merchant_vintage_log': math.log(600 + 1),
+            'device_fingerprint_new': 0.0,                     # Known device
+            'ip_risk_score': np.random.uniform(0.1, 0.4),
+            'geo_distance_score': np.random.uniform(0.0, 0.3),
+            'billing_shipping_mismatch': 0.0,
+            'label': 1,
+            'chargeback_label': 1,                             # Definite chargeback target
+            'source': 'fraud_chargeback_abuser'
+        }
+        rows.append(row)
+
+    # 1.6 Abuse Ring (Syndicate Fraud) (n=900)
+    for _ in range(900):
+        if np.random.rand() < 0.3:
+            amount = float(np.random.choice([5000, 10000, 15000, 25000, 50000]))
+        else:
+            amount = float(np.random.uniform(5000, 50000))
+        merch_avg = 5000.0
+        merch_std = 3000.0
+        row = {
+            'amount_log': math.log(amount + 1),
+            'amount_zscore': (amount - merch_avg) / merch_std,
+            'is_round_amount': check_round_amount(amount),
+            'amount_to_avg_ratio': amount / merch_avg,
+            'is_high_value': 0.0,
+            'hour_of_day': np.random.uniform(0.0, 1.0),
+            'is_weekend': float(np.random.choice([0, 1], p=[0.5, 0.5])),
+            'is_late_night': float(np.random.choice([0, 1], p=[0.5, 0.5])),
+            'days_since_last_txn': np.random.uniform(0.0, 0.05),
+            'txn_count_1h': np.random.uniform(0.4, 0.9),
+            'txn_count_24h': np.random.uniform(0.5, 1.0),
+            'distinct_merchants_1h': np.random.uniform(0.4, 1.0),
+            'amount_sum_24h_log': math.log(np.random.uniform(20000, 150000) + 1),
+            'payment_method_risk': np.random.choice([0.35, 0.15], p=[0.6, 0.4]),
+            'is_international': float(np.random.choice([0, 1], p=[0.7, 0.3])),
+            'is_first_time_card': 1.0,
+            'card_bin_risk': np.random.uniform(0.25, 0.35),
+            'customer_account_age_log': math.log(np.random.randint(1, 15) + 1),
+            'customer_total_txns_log': math.log(np.random.randint(1, 6) + 1),
+            'customer_dispute_rate': np.random.uniform(0.15, 0.5),
+            'email_domain_risk': np.random.choice([0.30, 0.90], p=[0.3, 0.7]),
+            'phone_verified': float(np.random.choice([0, 1], p=[0.7, 0.3])),
+            'merchant_fraud_rate_30d': np.random.uniform(0.03, 0.09),
+            'merchant_category_risk': 0.45,
+            'merchant_avg_txn_log': math.log(merch_avg + 1),
+            'merchant_vintage_log': math.log(200 + 1),
+            'device_fingerprint_new': 1.0,                     # Fast cycling devices
+            'ip_risk_score': np.random.uniform(0.7, 1.0),      # High proxy score
+            'geo_distance_score': np.random.uniform(0.5, 0.95),
+            'billing_shipping_mismatch': float(np.random.choice([0, 1], p=[0.4, 0.6])),
+            'label': 1,
+            'chargeback_label': 0,
+            'source': 'fraud_abuse_ring'
+        }
+        rows.append(row)
+
+    # ─────────────────────────────────────────────────────────────
+    # 2. LEGITIMATE PATTERNS (Total = 5000)
+    # ─────────────────────────────────────────────────────────────
+
+    # 2.1 Regular Customer (n=1700): Established account, predictable behavior
+    for _ in range(1700):
+        if np.random.rand() < 0.25:
+            amount = float(np.random.choice([500, 1000, 1500, 2000, 2500, 5000, 10000]))
+        else:
+            amount = float(np.random.uniform(200, 15000))
+        merch_avg = 5000.0
+        merch_std = 3000.0
+        row = {
+            'amount_log': math.log(amount + 1),
+            'amount_zscore': (amount - merch_avg) / merch_std,
+            'is_round_amount': check_round_amount(amount),
+            'amount_to_avg_ratio': amount / merch_avg,
+            'is_high_value': 0.0,
+            'hour_of_day': np.random.uniform(0.35, 0.9),      # Day / evening hours
+            'is_weekend': float(np.random.choice([0, 1], p=[0.7, 0.3])),
+            'is_late_night': 0.0,
+            'days_since_last_txn': np.random.uniform(0.02, 0.2),
+            'txn_count_1h': np.random.uniform(0.0, 0.2),
+            'txn_count_24h': np.random.uniform(0.02, 0.1),
+            'distinct_merchants_1h': 0.2,
+            'amount_sum_24h_log': math.log(amount + np.random.uniform(0, 3000) + 1),
+            'payment_method_risk': np.random.choice([0.15, 0.20, 0.35, 0.10], p=[0.5, 0.25, 0.15, 0.1]),
+            'is_international': 0.0,
+            'is_first_time_card': 0.0,
+            'card_bin_risk': np.random.uniform(0.12, 0.22),
+            'customer_account_age_log': math.log(np.random.randint(180, 1200) + 1),
+            'customer_total_txns_log': math.log(np.random.randint(30, 300) + 1),
+            'customer_dispute_rate': np.random.uniform(0.0, 0.02),
+            'email_domain_risk': np.random.choice([0.05, 0.30], p=[0.3, 0.7]),
+            'phone_verified': 1.0,
+            'merchant_fraud_rate_30d': np.random.uniform(0.005, 0.02),
+            'merchant_category_risk': np.random.choice([0.08, 0.10, 0.20, 0.25]),
+            'merchant_avg_txn_log': math.log(merch_avg + 1),
+            'merchant_vintage_log': math.log(np.random.randint(365, 2000) + 1),
+            'device_fingerprint_new': float(np.random.choice([0, 1], p=[0.95, 0.05])),
+            'ip_risk_score': np.random.uniform(0.0, 0.15),
+            'geo_distance_score': np.random.uniform(0.0, 0.15),
+            'billing_shipping_mismatch': 0.0,
+            'label': 0,
+            'chargeback_label': 0,
+            'source': 'legit_regular_customer'
+        }
+        rows.append(row)
+
+    # 2.2 Low-Value Routine (n=1400): Daily groceries, food, small UPI
+    for _ in range(1400):
+        if np.random.rand() < 0.25:
+            amount = float(np.random.choice([500, 1000, 1500, 2000]))
+        else:
+            amount = float(np.random.uniform(50, 2000))
+        merch_avg = 1000.0
+        merch_std = 600.0
+        row = {
+            'amount_log': math.log(amount + 1),
+            'amount_zscore': (amount - merch_avg) / merch_std,
+            'is_round_amount': check_round_amount(amount),
+            'amount_to_avg_ratio': amount / merch_avg,
+            'is_high_value': 0.0,
+            'hour_of_day': np.random.uniform(0.3, 0.95),
+            'is_weekend': float(np.random.choice([0, 1], p=[0.7, 0.3])),
+            'is_late_night': 0.0,
+            'days_since_last_txn': np.random.uniform(0.01, 0.08),
+            'txn_count_1h': np.random.uniform(0.0, 0.1),
+            'txn_count_24h': np.random.uniform(0.02, 0.15),
+            'distinct_merchants_1h': 0.2,
+            'amount_sum_24h_log': math.log(amount + np.random.uniform(100, 1500) + 1),
+            'payment_method_risk': np.random.choice([0.15, 0.20, 0.10], p=[0.7, 0.2, 0.1]),
+            'is_international': 0.0,
+            'is_first_time_card': 0.0,
+            'card_bin_risk': np.random.uniform(0.12, 0.20),
+            'customer_account_age_log': math.log(np.random.randint(90, 800) + 1),
+            'customer_total_txns_log': math.log(np.random.randint(20, 250) + 1),
+            'customer_dispute_rate': 0.0,
+            'email_domain_risk': 0.30,
+            'phone_verified': 1.0,
+            'merchant_fraud_rate_30d': 0.005,
+            'merchant_category_risk': 0.08,
+            'merchant_avg_txn_log': math.log(merch_avg + 1),
+            'merchant_vintage_log': math.log(700 + 1),
+            'device_fingerprint_new': float(np.random.choice([0, 1], p=[0.9, 0.1])),
+            'ip_risk_score': np.random.uniform(0.0, 0.1),
+            'geo_distance_score': np.random.uniform(0.0, 0.1),
+            'billing_shipping_mismatch': 0.0,
+            'label': 0,
+            'chargeback_label': 0,
+            'source': 'legit_low_value_routine'
+        }
+        rows.append(row)
+
+    # 2.3 Verified Repeat (n=1300): Strong authentication, trusted hardware
+    for _ in range(1300):
+        if np.random.rand() < 0.25:
+            amount = float(np.random.choice([500, 1000, 2500, 5000, 10000, 20000]))
+        else:
+            amount = float(np.random.uniform(500, 30000))
+        merch_avg = 6000.0
+        merch_std = 3500.0
+        row = {
+            'amount_log': math.log(amount + 1),
+            'amount_zscore': (amount - merch_avg) / merch_std,
+            'is_round_amount': check_round_amount(amount),
+            'amount_to_avg_ratio': amount / merch_avg,
+            'is_high_value': 0.0,
+            'hour_of_day': np.random.uniform(0.35, 0.85),
+            'is_weekend': float(np.random.choice([0, 1], p=[0.75, 0.25])),
+            'is_late_night': 0.0,
+            'days_since_last_txn': np.random.uniform(0.03, 0.25),
+            'txn_count_1h': np.random.uniform(0.0, 0.2),
+            'txn_count_24h': np.random.uniform(0.02, 0.1),
+            'distinct_merchants_1h': 0.2,
+            'amount_sum_24h_log': math.log(amount + 1000),
+            'payment_method_risk': np.random.choice([0.15, 0.20, 0.25], p=[0.5, 0.3, 0.2]),
+            'is_international': 0.0,
+            'is_first_time_card': 0.0,
+            'card_bin_risk': np.random.uniform(0.12, 0.20),
+            'customer_account_age_log': math.log(np.random.randint(300, 1500) + 1),
+            'customer_total_txns_log': math.log(np.random.randint(50, 500) + 1),
+            'customer_dispute_rate': 0.0,
+            'email_domain_risk': np.random.choice([0.05, 0.30], p=[0.4, 0.6]),
+            'phone_verified': 1.0,
+            'merchant_fraud_rate_30d': np.random.uniform(0.005, 0.015),
+            'merchant_category_risk': 0.20,
+            'merchant_avg_txn_log': math.log(merch_avg + 1),
+            'merchant_vintage_log': math.log(1000 + 1),
+            'device_fingerprint_new': 0.0,
+            'ip_risk_score': np.random.uniform(0.0, 0.08),
+            'geo_distance_score': np.random.uniform(0.0, 0.1),
+            'billing_shipping_mismatch': 0.0,
+            'label': 0,
+            'chargeback_label': 0,
+            'source': 'legit_verified_repeat'
+        }
+        rows.append(row)
+
+    # 2.4 Legitimate High Value in Training Set (n=500)
+    # High-ticket legitimate purchases included in training so model learns
+    # that high amount != fraud if customer reputation and hardware trust are strong!
+    for _ in range(500):
+        if np.random.rand() < 0.3:
+            amount = float(np.random.choice([60000, 80000, 100000, 150000, 200000, 300000]))
+        else:
+            amount = float(np.random.uniform(50000, 400000))
+        merch_avg = 75000.0
+        merch_std = 35000.0
+        row = {
+            'amount_log': math.log(amount + 1),
+            'amount_zscore': (amount - merch_avg) / merch_std,
+            'is_round_amount': check_round_amount(amount),
+            'amount_to_avg_ratio': amount / merch_avg,
+            'is_high_value': 1.0,
+            'hour_of_day': np.random.uniform(0.35, 0.85),
+            'is_weekend': float(np.random.choice([0, 1], p=[0.7, 0.3])),
+            'is_late_night': 0.0,
+            'days_since_last_txn': np.random.uniform(0.05, 0.4),
+            'txn_count_1h': 0.1,
+            'txn_count_24h': 0.04,
+            'distinct_merchants_1h': 0.2,
+            'amount_sum_24h_log': math.log(amount + 1),
+            'payment_method_risk': np.random.choice([0.35, 0.25, 0.15], p=[0.6, 0.3, 0.1]),
+            'is_international': float(np.random.choice([0, 1], p=[0.85, 0.15])),
+            'is_first_time_card': 0.0,
+            'card_bin_risk': 0.15,
+            'customer_account_age_log': math.log(np.random.randint(400, 1800) + 1),
+            'customer_total_txns_log': math.log(np.random.randint(80, 700) + 1),
+            'customer_dispute_rate': 0.0,
+            'email_domain_risk': np.random.choice([0.05, 0.30], p=[0.5, 0.5]),
+            'phone_verified': 1.0,
+            'merchant_fraud_rate_30d': 0.008,
+            'merchant_category_risk': 0.35,
+            'merchant_avg_txn_log': math.log(merch_avg + 1),
+            'merchant_vintage_log': math.log(1200 + 1),
+            'device_fingerprint_new': float(np.random.choice([0, 1], p=[0.85, 0.15])),
+            'ip_risk_score': np.random.uniform(0.01, 0.12),
+            'geo_distance_score': np.random.uniform(0.0, 0.15),
+            'billing_shipping_mismatch': 0.0,
+            'label': 0,
+            'chargeback_label': 0,
+            'source': 'legit_high_value_train'
+        }
+        rows.append(row)
+
+    # 2.5 Legitimate High Value — KILL-SWITCH EVALUATION HOLDOUT (n=100)
+    # Strictly held out! NEVER included in training matrix X_train or X_test!
+    for _ in range(100):
+        if np.random.rand() < 0.3:
+            amount = float(np.random.choice([60000, 80000, 100000, 150000, 200000, 500000]))
+        else:
+            amount = float(np.random.uniform(55000, 500000))
+        merch_avg = 80000.0
+        merch_std = 40000.0
+        row = {
+            'amount_log': math.log(amount + 1),
+            'amount_zscore': (amount - merch_avg) / merch_std,
+            'is_round_amount': check_round_amount(amount),
+            'amount_to_avg_ratio': amount / merch_avg,
+            'is_high_value': 1.0,
+            'hour_of_day': np.random.uniform(0.4, 0.8),
+            'is_weekend': float(np.random.choice([0, 1], p=[0.7, 0.3])),
+            'is_late_night': 0.0,
+            'days_since_last_txn': np.random.uniform(0.1, 0.5),
+            'txn_count_1h': 0.1,                               # 1 transaction
+            'txn_count_24h': 0.04,
+            'distinct_merchants_1h': 0.2,
+            'amount_sum_24h_log': math.log(amount + 1),
+            'payment_method_risk': np.random.choice([0.35, 0.25], p=[0.7, 0.3]),
+            'is_international': float(np.random.choice([0, 1], p=[0.9, 0.1])),
+            'is_first_time_card': 0.0,
+            'card_bin_risk': 0.15,
+            'customer_account_age_log': math.log(np.random.randint(500, 2000) + 1),
+            'customer_total_txns_log': math.log(np.random.randint(100, 800) + 1),
+            'customer_dispute_rate': 0.0,
+            'email_domain_risk': np.random.choice([0.05, 0.30], p=[0.5, 0.5]),
+            'phone_verified': 1.0,
+            'merchant_fraud_rate_30d': 0.008,
+            'merchant_category_risk': 0.35,
+            'merchant_avg_txn_log': math.log(merch_avg + 1),
+            'merchant_vintage_log': math.log(1500 + 1),
+            'device_fingerprint_new': float(np.random.choice([0, 1], p=[0.9, 0.1])),
+            'ip_risk_score': 0.02,
+            'geo_distance_score': np.random.uniform(0.0, 0.1),
+            'billing_shipping_mismatch': 0.0,
+            'label': 0,
+            'chargeback_label': 0,
+            'source': 'legit_high_value'
+        }
+        rows.append(row)
+
+    df = pd.DataFrame(rows)
+    # Reorder columns strictly to ALL_FEATURE_NAMES + ['label', 'chargeback_label', 'source']
+    columns_order = ALL_FEATURE_NAMES + ['label', 'chargeback_label', 'source']
+    df = df[columns_order]
+    return df
+
 
 def produce_canonical_artifact():
     print("=" * 60)
-    print("  VIGILANT Data Shim v3.0 - Canonical Artifact Builder")
+    print("  SENTINEL Data Shim v1.0 - Canonical Training Artifact Builder")
     print("=" * 60)
     
-    print("[1/6] Loading Kaggle URL Dataset (No cleaning)...")
-    kaggle_url_df = load_kaggle_url_data()
-    
-    print("[2/6] Loading Kaggle NLP Dataset (Maintaining Authority bias)...")
-    kaggle_nlp_df = load_kaggle_nlp_data()
-    
-    print("[3/6] Loading Benign Authority Guardrail Corpus...")
-    benign_authority_df = load_benign_authority_data()
-    
-    print("[4/6] Loading Adaptive Curated DB...")
-    curated_df = load_curated_data()
-    
-    print("[5/6] Generating Synthetic Edge Cases...")
-    synthetic_edge_df = generate_synthetic_data()
-    
-    print("[6/6] Merging into canonical training mapping...")
-    canonical_df = pd.concat([
-        kaggle_url_df,
-        kaggle_nlp_df,
-        benign_authority_df,
-        synthetic_edge_df,
-        curated_df
-    ], ignore_index=True)
-    
-    # Enforce strict column ordering based on ALL_FEATURE_NAMES + metadata
-    cols = ALL_FEATURE_NAMES + ['label', 'source']
-    
-    # Fill any missing with 0 and subset
-    for col in cols:
-        if col not in canonical_df.columns:
-            canonical_df[col] = 0.0
-            
-    canonical_df = canonical_df[cols]
+    df = generate_canonical_dataset()
+    print(f"[1/3] Generated dataset: {len(df)} total transactions")
+    print(f"      Fraudulent (label=1): {(df['label'] == 1).sum()}")
+    print(f"      Legitimate (label=0): {(df['label'] == 0).sum()}")
+    print(f"      Chargeback Positive (chargeback_label=1): {(df['chargeback_label'] == 1).sum()}")
+    print(f"      Kill-switch corpus (legit_high_value): {(df['source'] == 'legit_high_value').sum()}")
     
     output_path = os.path.join(os.path.dirname(__file__), "training_v3.parquet")
-    canonical_df.to_parquet(output_path, index=False)
-    print(f"\n  ✓ Data Shim complete. Emitted canonical artifact to:\n    {output_path}")
+    print(f"[2/3] Writing canonical artifact to {output_path}...")
+    df.to_parquet(output_path, index=False)
+    print(f"[3/3] Done! Artifact ready for model training.")
+    print("=" * 60)
+
 
 if __name__ == "__main__":
     produce_canonical_artifact()

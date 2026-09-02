@@ -1,304 +1,264 @@
-"""VIGILANT Engine - Layer 4: Detection & Scoring Engine
+"""SENTINEL Engine - Layer 4: Fraud & Chargeback Scoring Engine
 
-Ensemble inference core. Stateless, horizontally scalable.
-Designed for sub-100ms latency.
+Ensemble inference core for real-time risk scoring.
+Stateless, horizontally scalable, designed for sub-10ms response.
 """
+import os
+import json
 import numpy as np
 import joblib
-import os
-from typing import Optional
+from typing import Optional, Tuple, List, Dict, Any
 from app.core.config import settings
-from app.services.phishtank import check_domain
-import urllib.parse
-URL_FEATURE_NAMES = [
-    'url_length', 'url_dot_count', 'url_hyphen_count', 'url_at_symbol',
-    'url_entropy', 'url_digit_ratio', 'url_has_ip', 'url_suspicious_tld',
-    'url_subdomain_depth', 'url_path_length', 'url_has_https', 'url_brand_similarity',
-    'url_brand_match',
-]
-
-NLP_FEATURE_NAMES = [
-    'nlp_urgency_score', 'nlp_threat_count', 'nlp_credential_count',
-    'nlp_action_count', 'nlp_exclamation_ratio', 'nlp_caps_ratio',
-    'nlp_sender_impersonation', 'nlp_ai_pattern_score',
-    'nlp_intent_trigger', 'nlp_intent_coercion', 'nlp_intent_harvest',
-    'nlp_intent_alignment', 'nlp_document_language', 'nlp_phone_number_present',
-    'nlp_authority_score'
-]
-
-STRUCTURAL_FEATURE_NAMES = [
-    'struct_href_mismatch', 'struct_has_login_form', 'struct_hidden_ratio',
-    'struct_homoglyph_count', 'struct_obfuscation_score',
-    'struct_redirection_chain_len'
-]
-
-ALL_FEATURE_NAMES = URL_FEATURE_NAMES + NLP_FEATURE_NAMES + STRUCTURAL_FEATURE_NAMES
-
-import hashlib
-
-def get_feature_fingerprint() -> str:
-    """Generate a SHA-256 hash of the exact feature schema."""
-    schema_str = ",".join(ALL_FEATURE_NAMES)
-    return hashlib.sha256(schema_str.encode('utf-8')).hexdigest()
+from app.engine.features import ALL_FEATURE_NAMES, get_feature_fingerprint
+from app.services.fraud_intel import check_card_bin, check_device
 
 
-class DetectionEngine:
+class FraudScoringEngine:
     """
-    Layer 4: Ensemble detection engine.
-    
-    - Model A: URL-based classifier (XGBoost)
-    - Model B: NLP text classifier (Random Forest)
-    - Aggregation: Weighted confidence scoring
-    - Graceful degradation: if one model fails, the other still works
+    Layer 4: Ensemble scoring engine.
+    - Model A: Transaction Fraud Classifier (XGBoost)
+    - Model B: Chargeback & Dispute Propensity Classifier (Random Forest)
+    - Non-negotiable deterministic security overrides (Policy Floors)
+    - Real-time BIN & Device Threat Intelligence
     """
-    
+
     def __init__(self):
-        self.url_model = None
-        self.nlp_model = None
-        self.url_model_version = "none"
-        self.nlp_model_version = "none"
+        self.fraud_model = None
+        self.chargeback_model = None
+        self.fraud_model_version = "none"
+        self.chargeback_model_version = "none"
         self._loaded = False
-    
+
     def load_models(self):
-        """Load pre-trained models from disk."""
+        """Load pre-trained models and verify schema integrity."""
         current_fingerprint = get_feature_fingerprint()
 
-        # URL model
-        url_path = settings.URL_MODEL_PATH
-        url_meta_path = url_path.replace('.joblib', '_meta.json')
-        if os.path.exists(url_path):
-            if os.path.exists(url_meta_path):
-                import json
-                with open(url_meta_path, 'r') as f:
+        # 1. Fraud model (XGBoost)
+        fraud_path = settings.FRAUD_MODEL_PATH
+        fraud_meta_path = fraud_path.replace('.joblib', '_meta.json')
+        if os.path.exists(fraud_path):
+            if os.path.exists(fraud_meta_path):
+                with open(fraud_meta_path, 'r') as f:
                     meta = json.load(f)
                     if meta.get("schema_hash") and meta["schema_hash"] != current_fingerprint:
-                        raise RuntimeError(f"URL Model schema mismatch! Expected {current_fingerprint}, got {meta['schema_hash']}. Please retrain.")
-            
-            self.url_model = joblib.load(url_path)
-            self.url_model_version = "v3.0"
+                        raise RuntimeError(
+                            f"Fraud Model schema mismatch! Expected {current_fingerprint}, "
+                            f"got {meta['schema_hash']}. Please retrain."
+                        )
+            self.fraud_model = joblib.load(fraud_path)
+            self.fraud_model_version = "v1.0-xgb"
         else:
-            print(f"[WARN] URL model not found at {url_path} — using heuristic fallback")
-        
-        # NLP model
-        nlp_path = settings.NLP_MODEL_PATH
-        nlp_meta_path = nlp_path.replace('.joblib', '_meta.json')
-        if os.path.exists(nlp_path):
-            if os.path.exists(nlp_meta_path):
-                import json
-                with open(nlp_meta_path, 'r') as f:
-                    meta = json.load(f)
-                    if meta.get("schema_hash") and meta["schema_hash"] != current_fingerprint:
-                        raise RuntimeError(f"NLP Model schema mismatch! Expected {current_fingerprint}, got {meta['schema_hash']}. Please retrain.")
+            print(f"[WARN] Fraud model not found at {fraud_path} — heuristic fallback active")
 
-            self.nlp_model = joblib.load(nlp_path)
-            self.nlp_model_version = "v3.0"
+        # 2. Chargeback model (Random Forest)
+        cb_path = settings.CHARGEBACK_MODEL_PATH
+        cb_meta_path = cb_path.replace('.joblib', '_meta.json')
+        if os.path.exists(cb_path):
+            if os.path.exists(cb_meta_path):
+                with open(cb_meta_path, 'r') as f:
+                    meta = json.load(f)
+                    if meta.get("schema_hash") and meta["schema_hash"] != current_fingerprint:
+                        raise RuntimeError(
+                            f"Chargeback Model schema mismatch! Expected {current_fingerprint}, "
+                            f"got {meta['schema_hash']}. Please retrain."
+                        )
+            self.chargeback_model = joblib.load(cb_path)
+            self.chargeback_model_version = "v1.0-rf"
         else:
-            print(f"[WARN] NLP model not found at {nlp_path} — using heuristic fallback")
-        
+            print(f"[WARN] Chargeback model not found at {cb_path} — heuristic fallback active")
+
         self._loaded = True
-    
-    def _heuristic_url_score(self, features: dict) -> float:
-        """Fallback heuristic when ML model is not available."""
+
+    def _get_model_input(self, features: dict) -> np.ndarray:
+        """Build strict feature vector aligned to ALL_FEATURE_NAMES."""
+        vec = [float(features.get(name, 0.0)) for name in ALL_FEATURE_NAMES]
+        return np.array([vec])
+
+    def _heuristic_fraud_score(self, features: dict) -> float:
+        """Fallback heuristic when ML model is unavailable."""
         score = 0.0
-        
-        # Long URLs are suspicious
-        if features.get('url_length', 0) > 75:
-            score += 15
-        if features.get('url_length', 0) > 150:
-            score += 10
-        
-        # IP address instead of domain
-        if features.get('url_has_ip', 0):
-            score += 25
-        
-        # No HTTPS
-        if not features.get('url_has_https', 0):
-            score += 10
-        
-        # Suspicious TLD
-        if features.get('url_suspicious_tld', 0):
-            score += 20
-        
-        # Brand impersonation
-        brand_sim = features.get('url_brand_similarity', 0)
-        score += brand_sim * 30
-        
-        # High entropy
-        if features.get('url_entropy', 0) > 4.5:
-            score += 10
-        
-        # @ symbol in URL
-        if features.get('url_at_symbol', 0):
-            score += 20
-        
-        # Deep subdomains
-        if features.get('url_subdomain_depth', 0) > 2:
-            score += 10
-        
-        return min(score, 100)
-    
-    def _get_model_input(self, model, features: dict) -> np.ndarray:
+        if features.get('txn_count_1h', 0) > 0.4:
+            score += 35.0
+        if features.get('device_fingerprint_new', 0) == 1 and features.get('ip_risk_score', 0) > 0.6:
+            score += 30.0
+        if features.get('billing_shipping_mismatch', 0) == 1:
+            score += 20.0
+        if features.get('amount_zscore', 0) > 3.0:
+            score += 20.0
+        if features.get('customer_dispute_rate', 0) > 0.2:
+            score += 25.0
+        return min(score, 100.0)
+
+    def _heuristic_chargeback_score(self, features: dict) -> float:
+        """Fallback chargeback heuristic."""
+        score = features.get('customer_dispute_rate', 0) * 80.0
+        if features.get('is_first_time_card', 0) == 1 and features.get('is_high_value', 0) == 1:
+            score += 25.0
+        if features.get('billing_shipping_mismatch', 0) == 1:
+            score += 20.0
+        return min(score, 100.0)
+
+    def apply_binary_rules(self, features: dict, base_fraud: float, base_cb: float) -> Tuple[float, float, list]:
         """
-        Safely build feature vector for a model.
-        Legacy models expect 25 features. New ones might expect more.
+        Apply deterministic policy floors that cannot be diluted by statistical models.
         """
-        full_vec = [features.get(f, 0) for f in ALL_FEATURE_NAMES]
-        
-        # Check model expectations
-        try:
-            if hasattr(model, "n_features_in_"):
-                n = model.n_features_in_
-            elif hasattr(model, "feature_names_in_"):
-                n = len(model.feature_names_in_)
-            else:
-                # Default fallback for our legacy models
-                n = 25
-            
-            return np.array([full_vec[:n]])
-        except Exception:
-            # Absolute fallback to legacy size
-            return np.array([full_vec[:25]])
+        overrides = []
+        fraud_score = float(base_fraud)
+        cb_score = float(base_cb)
 
-    def apply_binary_rules(self, features: dict, base_score: float, channel: str = "url", suppress_rules: list = None) -> tuple[float, list]:
+        # Rule 1: High Velocity Spike
+        if features.get('txn_count_1h', 0) >= 0.5:
+            fraud_score = max(fraud_score, 82.0)
+            overrides.append({
+                "id": "RULE_VELOCITY_SPIKE",
+                "reason": "Rapid transaction velocity detected (>5 txns/hr from same account/device)",
+                "force_severity": "CRITICAL",
+                "category": "Velocity"
+            })
+
+        # Rule 2: Card Testing Pattern
+        if features.get('amount_log', 0) < 4.6 and features.get('txn_count_1h', 0) >= 0.3:
+            fraud_score = max(fraud_score, 85.0)
+            overrides.append({
+                "id": "RULE_CARD_TESTING",
+                "reason": "Card testing signature detected (rapid micro-authorizations under INR 100)",
+                "force_severity": "CRITICAL",
+                "category": "Card Abuse"
+            })
+
+        # Rule 3: Syndicate / Abuse Ring
+        if (features.get('device_fingerprint_new', 0) == 1 and 
+            features.get('ip_risk_score', 0) >= 0.7 and 
+            (features.get('txn_count_24h', 0) >= 0.15 or features.get('billing_shipping_mismatch', 0) == 1)):
+            fraud_score = max(fraud_score, 90.0)
+            cb_score = max(cb_score, 85.0)
+            overrides.append({
+                "id": "RULE_ABUSE_RING",
+                "reason": "Syndicate / abuse ring characteristics detected (new hardware with high proxy/VPN score)",
+                "force_severity": "CRITICAL",
+                "category": "Syndicate Risk"
+            })
+
+        # Rule 4: International High-Value Address Mismatch
+        if (features.get('billing_shipping_mismatch', 0) == 1 and 
+            features.get('is_international', 0) == 1 and 
+            features.get('is_high_value', 0) == 1):
+            fraud_score = max(fraud_score, 78.0)
+            cb_score = max(cb_score, 75.0)
+            overrides.append({
+                "id": "RULE_GEO_MISMATCH",
+                "reason": "Cross-border high-ticket purchase with mismatched billing and shipping jurisdictions",
+                "force_severity": "HIGH",
+                "category": "Identity"
+            })
+
+        # Rule 5: Chronic Chargeback Abuser
+        if features.get('customer_dispute_rate', 0) >= 0.35:
+            cb_score = max(cb_score, 85.0)
+            fraud_score = max(fraud_score, 70.0)
+            overrides.append({
+                "id": "RULE_CHRONIC_DISPUTER",
+                "reason": "Customer profile exhibits severe historical chargeback frequency (>35% dispute rate)",
+                "force_severity": "HIGH",
+                "category": "Chargeback Abuse"
+            })
+
+        # Rule 6: Account Takeover (ATO) Pattern
+        if (features.get('device_fingerprint_new', 0) == 1 and 
+            features.get('is_high_value', 0) == 1 and 
+            features.get('is_late_night', 0) == 1):
+            fraud_score = max(fraud_score, 85.0)
+            overrides.append({
+                "id": "RULE_ATO_PATTERN",
+                "reason": "High-value purchase from unrecognized device executed during overnight hours",
+                "force_severity": "CRITICAL",
+                "category": "Account Takeover"
+            })
+
+        return fraud_score, cb_score, overrides
+
+    def predict(self, features: dict, card_bin: str = None, device_fingerprint: str = None) -> dict:
         """
-        Apply non-negotiable security overrides.
-        Rules are channel-scoped to prevent text analysis from using URL logic.
-        """
-        applied = []
-        suppress_rules = suppress_rules or []
-        new_score = float(base_score)
-
-        if channel == "url":
-            # Rule 1: Brand Spoofing
-            if "RULE_BRAND_SPOOF" not in suppress_rules:
-                if features.get('url_brand_similarity', 0) > 0.8 and features.get('url_brand_match', 0):
-                    new_score = max(new_score, 80.0)
-                    applied.append({
-                        "id": "RULE_BRAND_SPOOF",
-                        "reason": "Domain resembles a protected brand but is not official.",
-                        "force_severity": "HIGH"
-                    })
-
-            # Rule 2: Homoglyphs on non-HTTPS
-            if "RULE_HOMOGLYPH_INSECURE" not in suppress_rules:
-                if features.get('struct_homoglyph_count', 0) > 0 and not features.get('url_has_https', 0):
-                    new_score = max(new_score, 85.0)
-                    applied.append({
-                        "id": "RULE_HOMOGLYPH_INSECURE",
-                        "reason": "Visually deceptive characters used on an insecure connection.",
-                        "force_severity": "CRITICAL"
-                    })
-
-            # Rule 3: Redirection Obfuscation (@ symbol)
-            if "RULE_REDIRECT_OBFUSCATION" not in suppress_rules:
-                if features.get('url_at_symbol', 0):
-                    new_score = max(new_score, 75.0)
-                    applied.append({
-                        "id": "RULE_REDIRECT_OBFUSCATION",
-                        "reason": "URL uses '@' symbol to hide the actual host destination.",
-                        "force_severity": "HIGH"
-                    })
-                    
-            # Rule 4: Real-time Threat Intel (PhishTank Layer 2)
-            if "RULE_THREAT_INTEL" not in suppress_rules:
-                pass
-
-        return new_score, applied
-
-    def predict(self, features: dict, channel: str = "url", suppress_rules: list = None, raw_url: str = None) -> dict:
-        """
-        Run ensemble prediction with v2.0 hardening and v4.0 Threat Intel.
+        Execute ensemble fraud and chargeback inference.
         """
         if not self._loaded:
             self.load_models()
-        
-        # 1. URL Model Prediction
-        url_input = self._get_model_input(self.url_model, features)
-        if self.url_model is not None:
-            try:
-                url_prob = self.url_model.predict_proba(url_input)[0]
-                url_score = float(url_prob[1]) * 100 if len(url_prob) > 1 else float(url_prob[0]) * 100
-            except Exception as e:
-                print(f"[WARN] URL model inference error: {e}")
-                url_score = self._heuristic_url_score(features)
-        else:
-            url_score = self._heuristic_url_score(features)
-        
-        # 2. NLP Model Prediction
-        nlp_input = self._get_model_input(self.nlp_model, features)
-        if self.nlp_model is not None:
-            try:
-                nlp_prob = self.nlp_model.predict_proba(nlp_input)[0]
-                nlp_score = float(nlp_prob[1]) * 100 if len(nlp_prob) > 1 else float(nlp_prob[0]) * 100
-            except Exception as e:
-                print(f"[WARN] NLP model inference error: {e}")
-                nlp_score = self._heuristic_nlp_score(features)
-        else:
-            nlp_score = self._heuristic_nlp_score(features)
-        
-        # 3. Structural Penalty
-        struct_score = 0.0
-        struct_score += features.get('struct_homoglyph_count', 0) * 40
-        struct_score += features.get('struct_href_mismatch', 0) * 30
-        struct_score += features.get('struct_has_login_form', 0) * 20
-        struct_score += features.get('struct_obfuscation_score', 0) * 15
-        
-        # 4. Adaptive Weighting
-        if channel == "url":
-            base_score = (url_score * 0.7) + (nlp_score * 0.3)
-        else:
-            base_score = (url_score * 0.3) + (nlp_score * 0.7)
-            
-        # 5. Apply Binary Overrides (Stage A: Pre-aggregation)
-        risk_score, overrides = self.apply_binary_rules(features, base_score, channel, suppress_rules)
-        overrides = overrides or []
-        
-        # 5.5 Threat Intel Lookup (Layer 2)
-        if raw_url and check_domain(urllib.parse.urlparse(raw_url).hostname):
-            overrides.append({
-                "id": "RULE_THREAT_INTEL",
-                "reason": "Domain verified as malicious by Threat Intelligence feeds.",
-                "force_severity": "CRITICAL"
-            })
-            risk_score = max(risk_score, 95.0)
-        
-        # Final Aggregation
-        final_score = (risk_score * 0.6) + (min(struct_score, 100) * 0.4)
-        
-        # 6. Apply Binary Overrides (Stage B: Final Floor Enforcement)
-        # If any override forces a specific severity, ensure the final_score matches it.
-        for ovr in overrides:
-            if ovr.get('force_severity') == 'CRITICAL':
-                final_score = max(final_score, 85.0)
-            elif ovr.get('force_severity') == 'HIGH':
-                final_score = max(final_score, 65.0)
 
-        final_score = min(round(final_score, 2), 100)
-        
-        # Determine severity
-        if final_score >= 85:
-            severity = "CRITICAL"
-        elif final_score >= 65:
-            severity = "HIGH"
-        elif final_score >= 35:
-            severity = "MEDIUM"
+        input_vec = self._get_model_input(features)
+
+        # 1. Fraud model inference
+        if self.fraud_model is not None:
+            try:
+                probs = self.fraud_model.predict_proba(input_vec)[0]
+                base_fraud = float(probs[1]) * 100.0 if len(probs) > 1 else float(probs[0]) * 100.0
+            except Exception as e:
+                print(f"[WARN] Fraud model inference error: {e}")
+                base_fraud = self._heuristic_fraud_score(features)
         else:
-            severity = "LOW"
-        
+            base_fraud = self._heuristic_fraud_score(features)
+
+        # 2. Chargeback model inference
+        if self.chargeback_model is not None:
+            try:
+                probs = self.chargeback_model.predict_proba(input_vec)[0]
+                base_cb = float(probs[1]) * 100.0 if len(probs) > 1 else float(probs[0]) * 100.0
+            except Exception as e:
+                print(f"[WARN] Chargeback model inference error: {e}")
+                base_cb = self._heuristic_chargeback_score(features)
+        else:
+            base_cb = self._heuristic_chargeback_score(features)
+
+        # 3. Apply binary policy overrides
+        fraud_score, cb_score, overrides = self.apply_binary_rules(features, base_fraud, base_cb)
+
+        # 4. Threat Intelligence Checks (Layer 2)
+        if card_bin and check_card_bin(card_bin):
+            overrides.append({
+                "id": "RULE_THREAT_INTEL_BIN",
+                "reason": f"Card BIN {card_bin} flagged in BFSI Fraud Intelligence database",
+                "force_severity": "CRITICAL",
+                "category": "Threat Intel"
+            })
+            fraud_score = max(fraud_score, 92.0)
+
+        if device_fingerprint and check_device(device_fingerprint):
+            overrides.append({
+                "id": "RULE_THREAT_INTEL_DEVICE",
+                "reason": "Device hardware hash linked to known fraud ring syndicate",
+                "force_severity": "CRITICAL",
+                "category": "Threat Intel"
+            })
+            fraud_score = max(fraud_score, 95.0)
+            cb_score = max(cb_score, 90.0)
+
+        fraud_score = min(round(fraud_score, 2), 100.0)
+        cb_score = min(round(cb_score, 2), 100.0)
+
+        # Severity classification
+        max_score = max(fraud_score, cb_score)
+        if max_score >= 85:
+            risk_level = "CRITICAL"
+        elif max_score >= 60:
+            risk_level = "HIGH"
+        elif max_score >= 30:
+            risk_level = "MEDIUM"
+        else:
+            risk_level = "LOW"
+
         return {
-            "risk_score": final_score,
-            "severity": severity,
-            "is_phishing": final_score >= 50,
-            "url_score": round(url_score, 2),
-            "nlp_score": round(nlp_score, 2),
-            "struct_score": round(struct_score, 2),
+            "fraud_score": fraud_score,
+            "chargeback_score": cb_score,
+            "risk_level": risk_level,
+            "is_fraudulent": (fraud_score >= 50.0 or cb_score >= 60.0),
+            "base_fraud_score": round(base_fraud, 2),
+            "base_chargeback_score": round(base_cb, 2),
             "overrides": overrides,
             "model_versions": {
-                "url_model": self.url_model_version,
-                "nlp_model": self.nlp_model_version,
-            },
+                "fraud_model": self.fraud_model_version,
+                "chargeback_model": self.chargeback_model_version,
+            }
         }
 
 
 # Singleton instance
-detection_engine = DetectionEngine()
+fraud_engine = FraudScoringEngine()

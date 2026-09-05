@@ -106,6 +106,17 @@ class FraudScoringEngine:
         fraud_score = float(base_fraud)
         cb_score = float(base_cb)
 
+        # ─── Customer Trust Factor (Defense vs False Decline Calibration) ───
+        # Established account (>90 days), clean dispute history, verified phone,
+        # and clean network connection (<0.25 IP risk).
+        is_high_trust = (
+            features.get('customer_account_age_log', 0) >= 4.5 and
+            features.get('customer_total_txns_log', 0) >= 2.3 and
+            features.get('customer_dispute_rate', 0) <= 0.02 and
+            features.get('phone_verified', 0) == 1.0 and
+            features.get('ip_risk_score', 1.0) <= 0.25
+        )
+
         # Rule 1: High Velocity Spike
         if features.get('txn_count_1h', 0) >= 0.5:
             fraud_score = max(fraud_score, 82.0)
@@ -140,17 +151,20 @@ class FraudScoringEngine:
             })
 
         # Rule 4: International High-Value Address Mismatch
+        # Untrusted cross-border mismatch = hard BLOCK.
+        # Established high-trust profiles (e.g. NRI gifting family in India) are not blindly blocked.
         if (features.get('billing_shipping_mismatch', 0) == 1 and 
             features.get('is_international', 0) == 1 and 
             features.get('is_high_value', 0) == 1):
-            fraud_score = max(fraud_score, 78.0)
-            cb_score = max(cb_score, 75.0)
-            overrides.append({
-                "id": "RULE_GEO_MISMATCH",
-                "reason": "Cross-border high-ticket purchase with mismatched billing and shipping jurisdictions",
-                "force_severity": "HIGH",
-                "category": "Identity"
-            })
+            if not is_high_trust or features.get('ip_risk_score', 0) > 0.30:
+                fraud_score = max(fraud_score, 78.0)
+                cb_score = max(cb_score, 75.0)
+                overrides.append({
+                    "id": "RULE_GEO_MISMATCH",
+                    "reason": "Cross-border high-ticket purchase with mismatched billing and shipping jurisdictions",
+                    "force_severity": "HIGH",
+                    "category": "Identity"
+                })
 
         # Rule 5: Chronic Chargeback Abuser
         if features.get('customer_dispute_rate', 0) >= 0.35:
@@ -164,16 +178,20 @@ class FraudScoringEngine:
             })
 
         # Rule 6: Account Takeover (ATO) Pattern
+        # Hard BLOCK when device is new, transaction is late night, and either IP is suspicious OR account lacks deep trust.
+        # Established high-trust users (e.g. 3 AM emergency hospital payments, midnight flash sales) with clean IP
+        # are stepped down from blind hard-blocks to protect merchant margins and essential transactions.
         if (features.get('device_fingerprint_new', 0) == 1 and 
             features.get('is_high_value', 0) == 1 and 
             features.get('is_late_night', 0) == 1):
-            fraud_score = max(fraud_score, 85.0)
-            overrides.append({
-                "id": "RULE_ATO_PATTERN",
-                "reason": "High-value purchase from unrecognized device executed during overnight hours",
-                "force_severity": "CRITICAL",
-                "category": "Account Takeover"
-            })
+            if not is_high_trust or features.get('ip_risk_score', 0) > 0.30:
+                fraud_score = max(fraud_score, 85.0)
+                overrides.append({
+                    "id": "RULE_ATO_PATTERN",
+                    "reason": "High-value purchase from unrecognized device executed during overnight hours",
+                    "force_severity": "CRITICAL",
+                    "category": "Account Takeover"
+                })
 
         return fraud_score, cb_score, overrides
 

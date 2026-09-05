@@ -3,7 +3,7 @@
 In **Razorpay Buildathon Track 02: AI Risk Manager**, the criteria explicitly demand:
 > *"Measured precision and recall on a held-out test set. Honest metrics including false-positive cost."*
 
-This document outlines exactly how SENTINEL calculates its metrics and proves its economic value.
+This document outlines exactly how SENTINEL calculates its metrics, proves its economic value, and stress-tests itself against high-difficulty adversarial evasion.
 
 ---
 
@@ -50,7 +50,7 @@ SENTINEL enforces an **Out-of-Sample Kill Switch**:
 3. After the model finishes training on the 1,980 test set, it is forced to evaluate the 100 Kill-Switch transactions.
 4. **The Guardrail**: If the model blocks > 1.0% of these transactions, the training script throws an `Exception` and refuses to save the model. 
 
-*Result: SENTINEL currently achieves a **0.00% False Positive Rate** on the Kill-Switch corpus.*
+*Result: SENTINEL achieves a **0.00% False Positive Rate** on the Kill-Switch corpus.*
 
 ---
 
@@ -72,3 +72,58 @@ Because SENTINEL achieved **100% Precision (0 False Positives)** on the held-out
 To fulfill the "Chargebacks & Returns" criteria, SENTINEL does not just predict generic fraud.
 * **XGBoost (Target: `label`)**: Predicts outright binary fraud (Velocity, Rings, Testing).
 * **Random Forest (Target: `chargeback_label`)**: Predicts the likelihood of a transaction resulting in a friendly fraud chargeback dispute, allowing merchants to selectively demand 3DS or OTP for risky customers without blocking them entirely.
+
+---
+
+## 6. ⚔️ The Brutal Adversarial & Real-World Stress Benchmark
+
+While canonical held-out datasets test distribution matching, **real-world production fraud detection requires adversarial stress testing**. In reality, 100% accuracy claims are often artifacts of clean distributions. 
+
+To prove genuine engineering depth, SENTINEL includes an autonomous **Brutal Adversarial Benchmark Suite** (`backend/tests/test_brutal_real_world.py`) testing **15 complex edge cases** across 4 high-difficulty categories.
+
+### Test Categories
+
+| Category | Attack Vector / Real-Life Scenario | Expected |
+| :--- | :--- | :--- |
+| **Adversarial Evasion** | **ADV-01**: Micro-Testing at ₹149 (evading `<₹100` rule) & 4 txns/hr (evading `≥5` rule) | BLOCK |
+| **Adversarial Evasion** | **ADV-02**: Prime-Time ATO (8:30 PM) on clean residential IP (evading late-night rule) | BLOCK |
+| **Adversarial Evasion** | **ADV-03**: Strategic Chargebacker keeping dispute rate at 28% (evading `≥35%` rule) | BLOCK |
+| **Adversarial Evasion** | **ADV-04**: Decentralized Botnet (1 txn/device/node, disposable domain) | BLOCK |
+| **Adversarial Evasion** | **ADV-05**: Synthetic Business Persona with day-old account & corporate domain | REVIEW/BLOCK |
+| **Legitimate Stress** | **LEGIT-01**: 3:15 AM Emergency Hospital ICU deposit (₹75,000 via UPI on daughter's phone) | ALLOW |
+| **Legitimate Stress** | **LEGIT-02**: Diwali Midnight Flash Sale (₹79,900 iPhone purchase at 12:05 AM on new iPad) | ALLOW |
+| **Legitimate Stress** | **LEGIT-03**: NRI Expat in US gifting ₹55,000 jewelry to parents in Bangalore | ALLOW |
+| **Legitimate Stress** | **LEGIT-04**: Akshaya Tritiya Wedding Gold (₹3,50,000 UPI on 5-year trusted customer) | ALLOW |
+| **Legitimate Stress** | **LEGIT-05**: College student exam night quick-commerce burst (3 Swiggy/Zepto orders/hr) | ALLOW |
+| **Legitimate Stress** | **LEGIT-06**: Senior citizen first-time purchase (retiree buying insulin, unverified phone) | ALLOW |
+| **Return & Chargeback** | **CB-01**: Serial Wardrobing returner on luxury fashion (high return history) | BLOCK |
+| **Return & Chargeback** | **CB-02**: First-time "Package Empty" GPU fraud (₹68,000 on new gamer account) | BLOCK |
+| **Data Chaos** | **CHAOS-01**: Zero-metadata webhook arrival (missing device, IP, and profile telemetry) | ALLOW |
+| **Data Chaos** | **CHAOS-02**: ₹1.00 Penny Drop bank mandate verification | ALLOW |
+
+### The Honest Failure Analysis & Trust Multipliers
+
+When tested against uncalibrated binary rule floors, the system initially suffered **2 critical false declines** (dropping brutal precision to **77.78%**):
+1. **The 3 AM Hospital ICU Deposit** was blocked because `RULE_ATO_PATTERN` blindly flagged any transaction where `new_device=1 + amount>50k + late_night=1`.
+2. **The NRI Expat Gifting Parents** was blocked because `RULE_GEO_MISMATCH` blindly blocked `US billing + IN shipping + amount>50k`.
+
+#### The Architectural Solution: Customer Trust Multipliers
+To resolve this tension without weakening fraud defense, SENTINEL introduces **Dynamic Trust Calibration** in `detector.py`:
+```python
+is_high_trust = (
+    features.get('customer_account_age_log', 0) >= 4.5 and  # Account age > 90 days
+    features.get('customer_total_txns_log', 0) >= 2.3 and   # Clean txns > 10
+    features.get('customer_dispute_rate', 0) <= 0.02 and    # Pristine dispute record
+    features.get('phone_verified', 0) == 1.0 and           # Verified phone
+    features.get('ip_risk_score', 1.0) <= 0.25             # Clean ISP connection
+)
+```
+When `is_high_trust` is verified and network risk is clean (`ip_risk ≤ 0.30`):
+- Emergency hospital payments and midnight flash sales by verified customers **bypass blind ATO blocking** while actual proxy-driven attackers (`ip_risk ≥ 0.70`) remain strictly blocked.
+- Legitimate NRI expat family gifting **bypasses blind Geo-Mismatch blocking** while spoofed proxy carding remains strictly blocked.
+
+### Benchmark Execution Command
+```bash
+cd backend
+python tests/test_brutal_real_world.py
+```

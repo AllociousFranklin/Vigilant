@@ -89,6 +89,11 @@ Held-Out Test Evaluation Results (n=1980):
 ======================================================================
 ```
 
+### ⚔️ Adversarial Stress Testing & Trust Multipliers
+To guarantee true defense-in-depth, SENTINEL is evaluated against an autonomous **15-scenario Adversarial Benchmark** (`tests/test_brutal_real_world.py`) testing evasive tactics (e.g. ₹149 micro-testing, prime-time ATO, 28% dispute rate) and real-life legitimate stress moments (3:00 AM ICU hospital deposits, Diwali midnight flash sales, NRI expat gifting). 
+
+Using **Dynamic Customer Trust Multipliers** (`detector.py`), SENTINEL protects against account takeovers without falsely declining established VIP customers during life-critical or festive moments.
+
 ---
 
 ## 🖥️ Frontend Merchant Console
@@ -152,7 +157,8 @@ cd backend
 python -m unittest discover -s tests -p "test_*.py"
 
 # Or run individual modules:
-python tests/test_precision_recall.py     # Verify 100% metrics and ₹0 FP cost
+python tests/test_brutal_real_world.py    # 15 brutal real-world adversarial & stress scenarios
+python tests/test_precision_recall.py     # Verify held-out metrics and ₹0 FP cost
 python tests/test_chargeback_evidence.py  # Validate legal dossier generation
 python tests/test_red_team_fraud.py       # Hit the engine with 6 distinct attack vectors
 python tests/test_api_integration.py      # Test FastAPI endpoint integrity
